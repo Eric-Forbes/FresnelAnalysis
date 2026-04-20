@@ -8,20 +8,46 @@
      v1.2.0  2025-01-xx  Rename nodes, drag-reorder, KML import/export,
                           distance labels on map, tooltips, coord entry,
                           copy values, OpenTopoData APIs
-     v1.3.0  2025-01-xx  Open-Elevation as default source,
-                          smart gap-filling node numbering (reuses
-                          freed slot numbers on delete), saved to
-                          /Users/ericforbes/Documents/Airendil Networks/
-                          FresnelCalculator/FresnelAnalysis/index.html
-     v1.4.0  2025-01-xx  Sidebar fully scrollable, tooltip popover over
-                          map, double-click to add node, per-link hide/show
-     v1.5.0  2025-01-xx  Version shown in header, default antenna height
-                          2m, clicking a node row loads it into the
-                          Add/Edit coord form and scrolls to it
-     v1.6.0  2025-01-xx  Form enters Edit mode when node selected (Enter
-                          or Update Node button overwrites the node),
-                          Cancel Edit clears state, name uniqueness
-                          enforced across add/edit/rename/import
+     v1.3.0  2025-01-xx  Open-Elevation as default source, smart
+                          gap-filling node numbering on delete, saved
+                          to FresnelAnalysis/index.html
+     v1.4.0  2025-01-xx  Sidebar fully scrollable, tooltip popover
+                          floats over map, double-click to add node,
+                          per-link hide/show toggle
+     v1.5.0  2025-01-xx  Version pill in header, default antenna
+                          height 2 m, node row click loads coord form
+     v1.6.0  2025-01-xx  Coord form Edit mode (Enter overwrites node),
+                          Cancel Edit, name uniqueness enforced across
+                          add / edit / rename / KML import
+     v1.6.1  2025-01-xx  Profile canvas: right margin widened to 62 px
+                          so last distance tick and right node label
+                          no longer clip; left node label left-anchored,
+                          right node label right-anchored; first/last
+                          x-axis ticks edge-aligned
+     v1.7.0  2025-01-xx  Analyze Changes: dirty-link tracking fully
+                          wired — drag, form edit, RF param changes all
+                          mark affected links dirty; button switches to
+                          "ANALYZE CHANGES (n)", skips clean links
+     v1.7.1  2025-01-xx  Live spinner + n/total counter on button while
+                          running; in-place log line updates per link
+     v1.7.2  2025-01-xx  Link list sorted by node-list order; hidden
+                          links excluded from analyze targets
+     v1.7.3  2025-01-xx  Profile cursor overlay: vertical hairline,
+                          terrain + LOS dots, data card; margin fixes
+     v1.7.4  2025-01-xx  Map tip simplified to "Double-click to add a
+                          node"; KML export saves freq, samples, k-factor,
+                          elevation source, default ant height, and per-link
+                          hidden state; KML import restores all of the above
+                          terrain + LOS dots, clearance bracket, data
+                          card (dist, terrain elev, LOS elev, clearance
+                          m, FZ1 radius, clearance %); right margin
+                          trimmed 62→44 px; left node label nudged
+                          right of mast; right label anchored inward
+     v1.7.0  2025-01-xx  Dirty-link tracking: button switches to
+                          "ANALYZE CHANGES (n)" when positions or antenna
+                          heights change; only affected links re-fetched,
+                          unchanged links skipped; log distinguishes
+                          position vs height-only changes
      ================================================================ -->
 <html lang="en">
 <head>
@@ -144,6 +170,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
 /* ── Profile ── */
 .profile-pane{border-top:1px solid var(--border);background:var(--bg2);position:relative;overflow:hidden}
 #profileCanvas{width:100%;height:100%;display:block}
+#profileOverlay{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
 .profile-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em;pointer-events:none}
 .profile-header{position:absolute;top:0;left:0;right:0;height:26px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;z-index:2;pointer-events:none;background:linear-gradient(to bottom,rgba(15,19,23,.95) 65%,transparent)}
 .profile-title{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
@@ -181,7 +208,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
   <div class="hpill" id="modePill">ADD NODE</div>
   <div class="spacer"></div>
   <div class="hpill" id="meshPill">0 NODES · 0 LINKS</div>
-  <div class="hpill" style="color:var(--muted);border-color:var(--border)">v1.6.0</div>
+  <div class="hpill" style="color:var(--muted);border-color:var(--border)">v1.7.4</div>
 </header>
 
 <div class="workspace">
@@ -219,7 +246,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
       <button class="btn btn-sm" id="modeMoveBtn" onclick="setMode('move')">↖ Move Node</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
-      <div class="field"><label>Frequency (MHz)</label><input type="number" id="freq" value="900" min="50" max="80000"></div>
+      <div class="field"><label>Frequency (MHz)</label><input type="number" id="freq" value="900" min="50" max="80000" onchange="invalidateAllAnalyzed('frequency')"></div>
       <div class="field"><label>Default ant. ht (m)</label><input type="number" id="defAntH" value="2" min="1" max="500"></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
@@ -228,14 +255,14 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
           Profile samples
           <span class="tip-icon" data-tip="Number of elevation points sampled along each link. More = smoother profile and better accuracy, but slower API calls. 200 is a good balance. Max 512.">?</span>
         </label>
-        <input type="number" id="nsamples" value="200" min="64" max="512">
+        <input type="number" id="nsamples" value="200" min="64" max="512" onchange="invalidateAllAnalyzed('sample count')">
       </div>
       <div class="field">
         <label>
           k-factor
           <span class="tip-icon" data-tip="Effective Earth radius multiplier accounting for atmospheric refraction. Standard atmosphere = 4/3 (1.333). Use 1.0 for flat-earth (no refraction). Values below 1.0 cause super-refraction. Affects earth bulge correction in the LOS calculation.">?</span>
         </label>
-        <input type="number" id="kfactor" value="1.333" step="0.001">
+        <input type="number" id="kfactor" value="1.333" step="0.001" onchange="invalidateAllAnalyzed('k-factor')">
       </div>
     </div>
   </div>
@@ -322,6 +349,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
     </div>
   </div>
   <canvas id="profileCanvas"></canvas>
+  <canvas id="profileOverlay"></canvas>
   <div class="profile-empty" id="profileEmpty">Select a link or click Analyze All</div>
 </div>
 </div>
@@ -337,6 +365,48 @@ const COLORS=['#00e5a0','#f5a623','#3b8bd4','#9b7fe8','#e24b4a','#e879a0','#3dd6
 let nodes=[], links=[], selectedLink=null, mode='add', map;
 let linkSeq=0;
 let dragSrcIdx=null;
+let profileLayout=null;  // exposed by drawProfile for cursor overlay
+
+// ── Dirty-link tracking ──────────────────────────────────────────────
+// Tracks which link IDs need re-analysis due to position/height changes.
+// When the set is non-empty the analyze button switches to "ANALYZE CHANGES".
+let dirtyLinks=new Set();
+
+function markDirty(linkIds){
+  linkIds.forEach(id=>dirtyLinks.add(id));
+  updateAnalyzeBtn();
+}
+function markClean(linkId){ dirtyLinks.delete(linkId); updateAnalyzeBtn(); }
+function resetDirty(){ dirtyLinks.clear(); updateAnalyzeBtn(); }
+
+// Invalidate all links that have already been analyzed (have a profile).
+// Called when RF params change (freq, k-factor, sample count) — elevation
+// data itself is still valid so we keep it, but we must recompute the
+// Fresnel physics. We mark every analyzed link dirty without clearing
+// the profile so the old result stays visible until re-analyzed.
+function invalidateAllAnalyzed(reason){
+  const analyzed=links.filter(l=>l.profile!==null);
+  if(!analyzed.length) return;
+  analyzed.forEach(l=>{ l.status='pending'; redrawLine(l); });
+  markDirty(analyzed.map(l=>l.id));
+  log(`${reason} changed — ${analyzed.length} link(s) need re-analysis`,'lwarn');
+  renderLinkList();
+}
+
+function updateAnalyzeBtn(){
+  const btn=document.getElementById('analyzeBtn');
+  if(!btn) return;
+  const n=dirtyLinks.size;
+  if(n>0){
+    btn.textContent=`ANALYZE CHANGES (${n})`;
+    btn.style.borderColor='var(--amber)';
+    btn.style.color='var(--amber)';
+  } else {
+    btn.textContent='ANALYZE ALL';
+    btn.style.borderColor='';
+    btn.style.color='';
+  }
+}
 
 // ── Smart node numbering ─────────────────────────────────────────────
 // Reuses the lowest free slot number when a node is deleted.
@@ -426,7 +496,9 @@ function addNode(lat, lon, overrideName=null, overrideH=null){
   marker.on('dragend',e=>{
     const n=nodes.find(n=>n.id===id); if(!n) return;
     n.lat=e.target.getLatLng().lat; n.lon=e.target.getLatLng().lng;
-    links.filter(l=>l.a===id||l.b===id).forEach(l=>{l.status='pending';l.profile=null;redrawLine(l);updateDistLabel(l)});
+    const affected=links.filter(l=>l.a===id||l.b===id);
+    affected.forEach(l=>{l.status='pending';l.profile=null;redrawLine(l);updateDistLabel(l)});
+    markDirty(affected.map(l=>l.id));
     renderNodeList(); renderLinkList();
     log(`${n.name} moved → ${n.lat.toFixed(5)}, ${n.lon.toFixed(5)}`,'linfo');
   });
@@ -468,6 +540,10 @@ function submitCoordForm(){
       if(conflict){toast(`Name "${newName}" already in use`); return}
     }
 
+    // Detect what changed for targeted logging
+    const posChanged = n.lat!==lat || n.lon!==lon;
+    const htChanged  = n.antH!==h;
+
     // Apply changes
     n.lat=lat; n.lon=lon; n.antH=h;
     if(newName !== n.name){
@@ -477,14 +553,19 @@ function submitCoordForm(){
     }
     n.marker.setLatLng([lat,lon]);
 
-    // Invalidate links through this node
-    links.filter(l=>l.a===n.id||l.b===n.id).forEach(l=>{
-      l.status='pending'; l.profile=null; redrawLine(l); updateDistLabel(l);
-    });
+    // Invalidate and mark dirty only if something analytically relevant changed
+    const affected=links.filter(l=>l.a===n.id||l.b===n.id);
+    if(posChanged||htChanged){
+      affected.forEach(l=>{l.status='pending';l.profile=null;redrawLine(l);updateDistLabel(l)});
+      markDirty(affected.map(l=>l.id));
+      const what=posChanged&&htChanged?'position + height':posChanged?'position':'antenna height';
+      log(`Updated ${n.name} — ${what} changed, ${affected.length} link(s) queued`,'lwarn');
+    } else {
+      log(`Updated ${n.name} — name only, no re-analysis needed`,'lok');
+    }
 
     renderNodeList(); renderLinkList();
     map.panTo([lat,lon]);
-    log(`Updated ${n.name} → ${lat.toFixed(5)}, ${lon.toFixed(5)}, ${h}m`,'lok');
     cancelEdit();
 
   } else {
@@ -536,15 +617,16 @@ function renameNode(id, newName){
 
 function removeNode(id){
   const n=nodes.find(n=>n.id===id); if(!n) return;
-  // Release the display number back into the pool so it can be reused
   releaseNum(n.num);
   map.removeLayer(n.marker);
   links.filter(l=>l.a===id||l.b===id).forEach(l=>{
     if(l.line) map.removeLayer(l.line);
     if(l.distLabel) map.removeLayer(l.distLabel);
+    dirtyLinks.delete(l.id);   // remove from dirty set — link no longer exists
   });
   links=links.filter(l=>l.a!==id&&l.b!==id);
   nodes=nodes.filter(n=>n.id!==id);
+  updateAnalyzeBtn();
   if(selectedLink&&!links.find(l=>l.id===selectedLink)){
     selectedLink=null; document.getElementById('profileEmpty').style.display='flex';
   }
@@ -583,6 +665,7 @@ function addLink(a,b){
   redrawLine(link);
   updateDistLabel(link);
   links.push(link);
+  markDirty([id]);
   return link;
 }
 
@@ -637,10 +720,7 @@ function setMode(m){
 function updateTip(){
   const el=document.getElementById('mapTip');
   if(mode==='add'){
-    // Preview which number the next node would get (lowest free slot)
-    let preview=highWater+1;
-    for(let n=1;n<=highWater;n++){ if(!usedNums.has(n)){preview=n;break} }
-    el.textContent=nodes.length===0?'Double-click map to place N1':`Double-click to add N${preview}`;
+    el.textContent='Double-click map to add a node';
     el.classList.remove('hide');
   } else {
     el.textContent='Drag nodes to reposition'; el.classList.remove('hide');
@@ -652,7 +732,7 @@ function clearAll(){
   nodes.forEach(n=>map.removeLayer(n.marker));
   links.forEach(l=>{if(l.line)map.removeLayer(l.line);if(l.distLabel)map.removeLayer(l.distLabel)});
   nodes=[]; links=[]; selectedLink=null; nodeSeq=0; linkSeq=0;
-  resetNums();
+  resetNums(); resetDirty();
   renderNodeList(); renderLinkList(); updateMeshPill(); updateTip();
   document.getElementById('profileEmpty').style.display='flex';
   clearResults(); log('Cleared','lwarn');
@@ -745,16 +825,30 @@ function toggleLinkHidden(id,e){
 function renderLinkList(){
   document.getElementById('linkCount').textContent=links.length;
   const el=document.getElementById('linkList'); el.innerHTML='';
-  links.forEach(l=>{
+
+  // Sort links so they appear in top-down node-list order:
+  // for each link, find the node-list index of each endpoint, then sort
+  // by (min-index, max-index) — gives N1↔N2, N1↔N3, N2↔N3 etc.
+  const nodeIdx=id=>nodes.findIndex(n=>n.id===id);
+  const sorted=[...links].sort((a,b)=>{
+    const aLo=Math.min(nodeIdx(a.a),nodeIdx(a.b)), aHi=Math.max(nodeIdx(a.a),nodeIdx(a.b));
+    const bLo=Math.min(nodeIdx(b.a),nodeIdx(b.b)), bHi=Math.max(nodeIdx(b.a),nodeIdx(b.b));
+    return aLo!==bLo ? aLo-bLo : aHi-bHi;
+  });
+
+  sorted.forEach(l=>{
     const d=document.createElement('div');
     const hiddenCls=l.hidden?' hidden-link':'';
     d.className='link-item'+(selectedLink===l.id?' sel':'')+hiddenCls;
     const dc={pending:'lp',good:'lg',warn:'lw',bad:'lb'}[l.status];
     const pct=l.clearPct!=null?Math.round(l.clearPct)+'%':'—';
     const dist=l.totalD>0?((l.totalD/1000).toFixed(1)+'km'):'';
-    const eyeIcon=l.hidden?'👁️‍🗨️':'👁';
+    // Ensure the displayed direction also follows node-list order
+    const idxA=nodeIdx(l.a), idxB=nodeIdx(l.b);
+    const nameL=idxA<=idxB?nname(l.a):nname(l.b);
+    const nameR=idxA<=idxB?nname(l.b):nname(l.a);
     d.innerHTML=`<div class="ldot ${dc}"></div>
-      <div class="link-names">${nname(l.a)} ↔ ${nname(l.b)}</div>
+      <div class="link-names">${nameL} ↔ ${nameR}</div>
       <div class="link-meta">${dist} ${pct}</div>
       <button class="link-eye" title="${l.hidden?'Show link':'Hide link'}" onclick="toggleLinkHidden(${l.id},event)">${l.hidden?'◌':'●'}</button>`;
     d.onclick=()=>{ if(!l.hidden) selectLink(l.id); };
@@ -770,13 +864,27 @@ function updateMeshPill(){
 function exportKML(){
   if(!nodes.length){toast('No nodes to export'); return}
   const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const freq    = document.getElementById('freq').value;
+  const samples = document.getElementById('nsamples').value;
+  const kfactor = document.getElementById('kfactor').value;
+  const src     = document.getElementById('srcType').value;
+  const defAntH = document.getElementById('defAntH').value;
+
   let kml=`<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document>
-  <name>Fresnel Mesh Network</name>
-  <description>Exported from Fresnel/Mesh Analyzer</description>\n`;
+  <n>Fresnel Mesh Network</n>
+  <description>Exported from Fresnel/Mesh Analyzer v1.7.4</description>
+  <ExtendedData>
+    <Data name="freq_mhz"><value>${freq}</value></Data>
+    <Data name="profile_samples"><value>${samples}</value></Data>
+    <Data name="k_factor"><value>${kfactor}</value></Data>
+    <Data name="elevation_source"><value>${esc(src)}</value></Data>
+    <Data name="default_ant_height_m"><value>${defAntH}</value></Data>
+    <Data name="node_order"><value>${nodes.map(n=>n.name).join(',')}</value></Data>
+  </ExtendedData>\n`;
 
-  // Styles
   COLORS.forEach((c,i)=>{
     const hex=c.replace('#','');
     kml+=`  <Style id="node${i}"><IconStyle><color>ff${hex.slice(4,6)}${hex.slice(2,4)}${hex.slice(0,2)}</color><scale>0.8</scale></IconStyle><LabelStyle><scale>0.7</scale></LabelStyle></Style>\n`;
@@ -786,34 +894,41 @@ function exportKML(){
   kml+=`  <Style id="link-bad"><LineStyle><color>ff4a4be2</color><width>2</width></LineStyle></Style>\n`;
   kml+=`  <Style id="link-pending"><LineStyle><color>ff7a6856</color><width>1</width></LineStyle></Style>\n`;
 
-  // Folder: Nodes
-  kml+=`  <Folder><name>Nodes</name>\n`;
+  kml+=`  <Folder><n>Nodes</n>\n`;
   nodes.forEach((n,i)=>{
     kml+=`    <Placemark>
-      <name>${esc(n.name)}</name>
+      <n>${esc(n.name)}</n>
       <description>Lat: ${n.lat.toFixed(5)}, Lon: ${n.lon.toFixed(5)}, Ant Height: ${n.antH}m</description>
       <styleUrl>#node${i%COLORS.length}</styleUrl>
       <ExtendedData>
         <Data name="antH"><value>${n.antH}</value></Data>
         <Data name="nodeId"><value>${n.id}</value></Data>
+        <Data name="listOrder"><value>${i}</value></Data>
       </ExtendedData>
       <Point><coordinates>${n.lon.toFixed(6)},${n.lat.toFixed(6)},0</coordinates></Point>
     </Placemark>\n`;
   });
   kml+=`  </Folder>\n`;
 
-  // Folder: Links
   if(links.length){
-    kml+=`  <Folder><name>Links</name>\n`;
+    kml+=`  <Folder><n>Links</n>\n`;
     links.forEach(l=>{
       const a=nodes.find(n=>n.id===l.a), b=nodes.find(n=>n.id===l.b);
       if(!a||!b) return;
       const dist=l.totalD>0?(l.totalD/1000).toFixed(2)+'km':'';
       const pct=l.clearPct!=null?Math.round(l.clearPct)+'% FZ1':'unanalyzed';
       kml+=`    <Placemark>
-      <name>${esc(a.name)} ↔ ${esc(b.name)}</name>
-      <description>Distance: ${dist} | Clearance: ${pct} | Status: ${l.status}</description>
+      <n>${esc(a.name)} \u2194 ${esc(b.name)}</n>
+      <description>Distance: ${dist} | Clearance: ${pct} | Status: ${l.status}${l.hidden?' | HIDDEN':''}</description>
       <styleUrl>#link-${l.status}</styleUrl>
+      <ExtendedData>
+        <Data name="nodeA"><value>${esc(a.name)}</value></Data>
+        <Data name="nodeB"><value>${esc(b.name)}</value></Data>
+        <Data name="hidden"><value>${l.hidden?'1':'0'}</value></Data>
+        <Data name="status"><value>${l.status}</value></Data>
+        <Data name="clearPct"><value>${l.clearPct!=null?l.clearPct.toFixed(1):''}</value></Data>
+        <Data name="distKm"><value>${l.totalD>0?(l.totalD/1000).toFixed(3):''}</value></Data>
+      </ExtendedData>
       <LineString><tessellate>1</tessellate>
         <coordinates>${a.lon.toFixed(6)},${a.lat.toFixed(6)},0 ${b.lon.toFixed(6)},${b.lat.toFixed(6)},0</coordinates>
       </LineString>
@@ -826,7 +941,7 @@ function exportKML(){
   const blob=new Blob([kml],{type:'application/vnd.google-earth.kml+xml'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='fresnel_mesh.kml'; a.click();
-  log('KML exported','lok');
+  log('KML exported -- freq, samples, k-factor, hidden states saved','lok');
 }
 
 // ── KML Import ───────────────────────────────────────────────────────
@@ -837,11 +952,34 @@ function importKML(event){
     try{
       const parser=new DOMParser();
       const doc=parser.parseFromString(e.target.result,'application/xml');
+      const getVal=name=>{
+        const el=doc.querySelector(`Document > ExtendedData > Data[name="${name}"] > value`);
+        return el?el.textContent.trim():null;
+      };
+
+      // Restore session params if present
+      const freq=getVal('freq_mhz');
+      const samples=getVal('profile_samples');
+      const kfactor=getVal('k_factor');
+      const src=getVal('elevation_source');
+      const defAntH=getVal('default_ant_height_m');
+      if(freq)    { document.getElementById('freq').value=freq; }
+      if(samples) { document.getElementById('nsamples').value=samples; }
+      if(kfactor) { document.getElementById('kfactor').value=kfactor; }
+      if(src){
+        const sel=document.getElementById('srcType');
+        if([...sel.options].some(o=>o.value===src)){ sel.value=src; updateSourceUI(); }
+      }
+      if(defAntH) { document.getElementById('defAntH').value=defAntH; }
+      const restoredParams=!!(freq||samples||kfactor||src||defAntH);
+
+      // Import nodes (Points only)
       const placemarks=doc.querySelectorAll('Placemark');
-      let count=0;
+      let nodeCount=0;
+      const nameToNode={};
       placemarks.forEach(pm=>{
         const pt=pm.querySelector('Point');
-        if(!pt) return; // skip LineStrings (links)
+        if(!pt) return;
         const coords=pt.querySelector('coordinates')?.textContent?.trim();
         if(!coords) return;
         const [lon,lat]=coords.split(',').map(Number);
@@ -849,17 +987,46 @@ function importKML(event){
         const name=pm.querySelector('name')?.textContent?.trim()||null;
         const antHEl=pm.querySelector('Data[name="antH"] value');
         const antH=antHEl?parseFloat(antHEl.textContent):null;
-        addNode(lat,lon,name,antH);
-        count++;
+        const n=addNode(lat,lon,name,antH);
+        if(name) nameToNode[name]=n;
+        nodeCount++;
       });
-      log(`Imported ${count} node(s) from KML`,'lok');
+
+      // Restore link hidden states (LineStrings only)
+      let hiddenCount=0;
+      placemarks.forEach(pm=>{
+        if(pm.querySelector('Point')) return; // skip nodes
+        const ls=pm.querySelector('LineString');
+        if(!ls) return;
+        const hiddenEl=pm.querySelector('Data[name="hidden"] value');
+        const hidden=hiddenEl?hiddenEl.textContent.trim()==='1':false;
+        if(!hidden) return;
+        // Match link by node names
+        const nodeA=pm.querySelector('Data[name="nodeA"] value')?.textContent?.trim();
+        const nodeB=pm.querySelector('Data[name="nodeB"] value')?.textContent?.trim();
+        if(!nodeA||!nodeB) return;
+        const na=nameToNode[nodeA], nb=nameToNode[nodeB];
+        if(!na||!nb) return;
+        const link=links.find(l=>(l.a===na.id&&l.b===nb.id)||(l.a===nb.id&&l.b===na.id));
+        if(link&&!link.hidden){
+          link.hidden=true;
+          redrawLine(link);
+          updateDistLabel(link);
+          hiddenCount++;
+        }
+      });
+
+      renderLinkList();
+      log(`Imported ${nodeCount} node(s) from KML`,'lok');
+      if(restoredParams) log('Session params restored (freq, samples, k-factor, source)','linfo');
+      if(hiddenCount) log(`${hiddenCount} link(s) restored as hidden`,'linfo');
       if(nodes.length>=2) map.fitBounds(nodes.map(n=>[n.lat,n.lon]),{padding:[50,50]});
     }catch(err){
       log(`KML parse error: ${err.message}`,'lerr');
     }
   };
   reader.readAsText(file);
-  event.target.value=''; // allow re-import same file
+  event.target.value='';
 }
 
 // ── Source UI ─────────────────────────────────────────────────────────
@@ -992,26 +1159,73 @@ async function analyzeLink(link){
 async function analyzeAll(){
   if(!links.length){log('No links — add nodes first','lwarn');return}
   const btn=document.getElementById('analyzeBtn');
-  btn.innerHTML='<span class="spinner"></span>RUNNING...'; btn.disabled=true;
-  log(`Analyzing ${links.length} link(s)...`,'linfo');
-  let ok=0,bad=0;
-  for(const link of links){
-    const na=nodes.find(n=>n.id===link.a),nb=nodes.find(n=>n.id===link.b);
-    try{
-      log(`${na.name} ↔ ${nb.name}...`,'linfo');
-      await analyzeLink(link);
-      log(`  ${link.clearPct.toFixed(0)}% FZ1 [${link.status.toUpperCase()}]`,
-          link.status==='good'?'lok':link.status==='warn'?'lwarn':'lerr');
-      ok++;
-    }catch(err){log(`  Error: ${err.message}`,'lerr');bad++}
+
+  // Decide scope — hidden links are always excluded from computation
+  const visibleIds = links.filter(l=>!l.hidden).map(l=>l.id);
+  const candidateIds = dirtyLinks.size>0
+    ? [...dirtyLinks].filter(id=>visibleIds.includes(id))
+    : visibleIds;
+  const targets   = candidateIds.map(id=>links.find(l=>l.id===id)).filter(Boolean);
+  const isPartial = dirtyLinks.size>0;
+  const total     = targets.length;
+  const hiddenCount = links.filter(l=>l.hidden).length;
+  const skipped   = links.length - total - hiddenCount;
+
+  // Helper: update button label with spinner + live n/total counter
+  function setBtnProgress(n){
+    btn.innerHTML=`<span class="spinner"></span>${isPartial?'CHANGES':'ANALYZING'} ${n}/${total}`;
   }
+
+  btn.disabled=true;
+  setBtnProgress(0);
+
+  // Add a single log line we'll update in-place as each link completes
+  const logEl=document.getElementById('log');
+  const progressLine=document.createElement('div');
+  progressLine.className='linfo';
+  const skipNote=[skipped>0?`${skipped} unchanged`:null, hiddenCount>0?`${hiddenCount} hidden`:null].filter(Boolean).join(', ');
+  progressLine.textContent=`[${ts()}] ${isPartial?'Analyzing changes':'Analyzing all'}: 0/${total} complete${skipNote?` · ${skipNote} skipped`:''}`;
+  logEl.appendChild(progressLine);
+  logEl.scrollTop=logEl.scrollHeight;
+
+  let ok=0, bad=0;
+  for(let i=0;i<targets.length;i++){
+    const link=targets[i];
+    const na=nodes.find(n=>n.id===link.a), nb=nodes.find(n=>n.id===link.b);
+    // Update progress before starting each link
+    setBtnProgress(i);
+    progressLine.textContent=`[${ts()}] ${na.name} ↔ ${nb.name}… (${i+1}/${total})`;
+    logEl.scrollTop=logEl.scrollHeight;
+    try{
+      await analyzeLink(link);
+      markClean(link.id);
+      ok++;
+      const cls=link.status==='good'?'lok':link.status==='warn'?'lwarn':'lerr';
+      progressLine.className=cls;
+      progressLine.textContent=`[${ts()}] ${na.name} ↔ ${nb.name}: ${link.clearPct.toFixed(0)}% FZ1 [${link.status.toUpperCase()}] (${i+1}/${total})`;
+    }catch(err){
+      bad++;
+      progressLine.className='lerr';
+      progressLine.textContent=`[${ts()}] ${na.name} ↔ ${nb.name}: error — ${err.message}`;
+    }
+    logEl.scrollTop=logEl.scrollHeight;
+  }
+
   renderLinkList();
   const toShow=selectedLink?links.find(l=>l.id===selectedLink):links[0];
   if(toShow?.profile) selectLink(toShow.id);
-  log(`Done: ${ok} ok, ${bad} errors`,bad===0?'lok':'lwarn');
-  const allGood=links.every(l=>l.status==='good'),anyBad=links.some(l=>l.status==='bad');
+
+  // Final summary line (new line, don't overwrite progress)
+  const summaryLine=document.createElement('div');
+  summaryLine.className=bad===0?'lok':'lwarn';
+  summaryLine.textContent=`[${ts()}] ${isPartial?'Changes':'All'} done: ${ok} ok${bad?', '+bad+' error(s)':''}${skipped>0?', '+skipped+' unchanged':''}${hiddenCount>0?', '+hiddenCount+' hidden (skipped)':''}`;
+  logEl.appendChild(summaryLine);
+  logEl.scrollTop=logEl.scrollHeight;
+
+  const allGood=links.every(l=>l.status==='good'), anyBad=links.some(l=>l.status==='bad');
   setPill('srcPill',allGood?'MESH OK':anyBad?'BLOCKED':'PARTIAL',allGood?'ok':anyBad?'err':'warn');
-  btn.textContent='ANALYZE ALL'; btn.disabled=false;
+  btn.disabled=false;
+  updateAnalyzeBtn();
 }
 
 // ── Profile drawing ───────────────────────────────────────────────────
@@ -1029,14 +1243,18 @@ function drawProfile(profile, na, nb){
   canvas.style.width=W+'px'; canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d'), dpr=devicePixelRatio;
 
-  const mx=50*dpr, myT=30*dpr, myB=20*dpr;
-  const pw=W*dpr-mx-8*dpr, ph=H*dpr-myT-myB;
+  // Left margin: Y-axis labels. Right margin: trimmed — node name right-anchors inward.
+  const mx=50*dpr, mxR=44*dpr, myT=30*dpr, myB=20*dpr;
+  const pw=W*dpr-mx-mxR, ph=H*dpr-myT-myB;
   ctx.clearRect(0,0,W*dpr,H*dpr);
 
   const allY=[...profile.map(p=>p.elev),...profile.map(p=>p.losAbs+p.fz1),...profile.map(p=>p.losAbs)];
   const wMin=Math.min(...allY)-12, wMax=Math.max(...allY)+16, wH=wMax-wMin;
   const wx=t=>mx+t*pw, wy=y=>myT+(1-(y-wMin)/wH)*ph;
   const N=profile.length;
+
+  // Expose layout so the cursor overlay can reuse same coordinate space
+  profileLayout={W,H,dpr,mx,mxR,myT,myB,pw,ph,wMin,wH,wx,wy,profile,na,nb};
 
   // Y grid
   const step=Math.pow(10,Math.floor(Math.log10(wH/4)));
@@ -1109,18 +1327,147 @@ function drawProfile(profile, na, nb){
   mast(0,profile[0].elev,na.antH,na.color);
   mast(1,profile[N-1].elev,nb.antH,nb.color);
 
-  // Node name labels
-  ctx.font=`500 ${9*dpr}px 'Azeret Mono',monospace`; ctx.textAlign='center';
-  ctx.fillStyle=na.color; ctx.fillText(na.name,wx(0),wy(profile[0].elev+na.antH)-9*dpr);
-  ctx.fillStyle=nb.color; ctx.fillText(nb.name,wx(1),wy(profile[N-1].elev+nb.antH)-9*dpr);
+  // Node name labels — left nudged right of mast, right anchored inward
+  ctx.font=`500 ${9*dpr}px 'Azeret Mono',monospace`;
+  ctx.fillStyle=na.color;
+  ctx.textAlign='left';
+  ctx.fillText(na.name, wx(0)+10*dpr, wy(profile[0].elev+na.antH)-9*dpr);
+  ctx.fillStyle=nb.color;
+  ctx.textAlign='right';
+  ctx.fillText(nb.name, wx(1)-10*dpr, wy(profile[N-1].elev+nb.antH)-9*dpr);
 
-  // X axis labels
-  ctx.fillStyle='#56687a'; ctx.font=`${9*dpr}px 'Azeret Mono',monospace`; ctx.textAlign='center';
+  // X axis labels — first left, last right, middle centered to avoid edge clipping
+  ctx.fillStyle='#56687a'; ctx.font=`${9*dpr}px 'Azeret Mono',monospace`;
   const totKm=profile[N-1].distKm;
-  for(let i=0;i<=5;i++){const t=i/5;ctx.fillText((t*totKm).toFixed(1)+'km',wx(t),myT+ph+myB-4*dpr)}
+  for(let i=0;i<=5;i++){
+    const t=i/5;
+    ctx.textAlign = i===0?'left':i===5?'right':'center';
+    ctx.fillText((t*totKm).toFixed(1)+'km', wx(t), myT+ph+myB-4*dpr);
+  }
 }
 
-// ── Results panel ─────────────────────────────────────────────────────
+// ── Profile cursor overlay ─────────────────────────────────────────────
+// Draws a crosshair + data card on the overlay canvas as the mouse moves.
+// Reads profileLayout set by drawProfile so coordinate math is identical.
+
+(function(){
+  const pane = ()=>document.getElementById('profileCanvas').parentElement;
+
+  function onMove(e){
+    const ov=document.getElementById('profileOverlay');
+    if(!ov||!profileLayout) return;
+    const L=profileLayout;
+    const rect=ov.getBoundingClientRect();
+    const cssX=e.clientX-rect.left, cssY=e.clientY-rect.top;
+    const cx=cssX*L.dpr, cy=cssY*L.dpr;
+
+    // Is cursor inside the plot area?
+    if(cx<L.mx||cx>L.mx+L.pw||cy<L.myT||cy>L.myT+L.ph){ clearOverlay(ov); return; }
+
+    // Find nearest profile sample by x position
+    const t=(cx-L.mx)/L.pw;
+    const idx=Math.round(t*(L.profile.length-1));
+    const p=L.profile[Math.max(0,Math.min(L.profile.length-1,idx))];
+
+    drawOverlay(ov, L, p, cx, cy);
+  }
+
+  function onLeave(){
+    const ov=document.getElementById('profileOverlay');
+    if(ov) clearOverlay(ov);
+  }
+
+  function clearOverlay(ov){
+    ov.width=ov.width; // fast clear
+  }
+
+  function drawOverlay(ov, L, p, cx, cy){
+    // Match canvas dimensions to base canvas
+    const base=document.getElementById('profileCanvas');
+    if(ov.width!==base.width||ov.height!==base.height){
+      ov.width=base.width; ov.height=base.height;
+      ov.style.width=base.style.width; ov.style.height=base.style.height;
+    }
+    const ctx=ov.getContext('2d'), dpr=L.dpr;
+    ctx.clearRect(0,0,ov.width,ov.height);
+
+    const x=L.wx(p.t);
+    const yTerrain=L.wy(p.elev);
+    const yLOS=L.wy(p.losAbs);
+
+    // Vertical hairline
+    ctx.beginPath(); ctx.moveTo(x,L.myT); ctx.lineTo(x,L.myT+L.ph);
+    ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=dpr; ctx.setLineDash([4*dpr,3*dpr]);
+    ctx.stroke(); ctx.setLineDash([]);
+
+    // Dot on terrain
+    ctx.beginPath(); ctx.arc(x,yTerrain,4*dpr,0,Math.PI*2);
+    ctx.fillStyle='#639922'; ctx.fill();
+    ctx.strokeStyle='#090c0e'; ctx.lineWidth=1.5*dpr; ctx.stroke();
+
+    // Dot on LOS
+    ctx.beginPath(); ctx.arc(x,yLOS,4*dpr,0,Math.PI*2);
+    ctx.fillStyle='#3b8bd4'; ctx.fill();
+    ctx.strokeStyle='#090c0e'; ctx.lineWidth=1.5*dpr; ctx.stroke();
+
+    // Clearance bracket
+    if(yLOS<yTerrain-2*dpr){
+      ctx.beginPath(); ctx.moveTo(x,yTerrain); ctx.lineTo(x,yLOS);
+      ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.lineWidth=dpr; ctx.setLineDash([]); ctx.stroke();
+    }
+
+    // Card contents
+    const fzPct = p.fz1>0 ? p.clearance/p.fz1*100 : null;
+    const fzPctStr = fzPct!=null ? `${fzPct.toFixed(0)}% FZ1` : '—';
+    const pctColor = fzPct==null?'#56687a':fzPct>=60?'#00e5a0':fzPct>=0?'#f5a623':'#e24b4a';
+    const lines=[
+      {label:'dist',   val:`${p.distKm.toFixed(2)} km`,      color:'#cdd8e3'},
+      {label:'terrain',val:`${p.elev.toFixed(0)} m`,          color:'#639922'},
+      {label:'LOS',    val:`${p.losAbs.toFixed(0)} m`,        color:'#3b8bd4'},
+      {label:'clr',    val:`${p.clearance.toFixed(1)} m`,     color:pctColor},
+      {label:'FZ1 r',  val:`${p.fz1.toFixed(1)} m`,          color:'rgba(245,166,35,0.9)'},
+      {label:'clr%',   val:fzPctStr,                          color:pctColor},
+    ];
+
+    const fs=9*dpr, lh=13*dpr, pad=7*dpr;
+    const cardW=128*dpr, cardH=lines.length*lh+pad*2;
+
+    // Position card: right of cursor if room, else left
+    let cardX=x+14*dpr;
+    if(cardX+cardW>L.mx+L.pw) cardX=x-14*dpr-cardW;
+    const cardY=Math.min(Math.max(L.myT, cy-cardH/2), L.myT+L.ph-cardH);
+
+    // Card background
+    ctx.fillStyle='rgba(9,12,14,0.88)';
+    ctx.strokeStyle='rgba(255,255,255,0.12)';
+    ctx.lineWidth=dpr;
+    ctx.beginPath();
+    ctx.roundRect(cardX,cardY,cardW,cardH,4*dpr);
+    ctx.fill(); ctx.stroke();
+
+    // Card rows
+    ctx.font=`${fs}px 'Azeret Mono',monospace`;
+    lines.forEach((row,i)=>{
+      const rowY=cardY+pad+(i+0.75)*lh;
+      ctx.fillStyle='#56687a'; ctx.textAlign='left';
+      ctx.fillText(row.label, cardX+pad, rowY);
+      ctx.fillStyle=row.color; ctx.textAlign='right';
+      ctx.fillText(row.val, cardX+cardW-pad, rowY);
+    });
+  }
+
+  // Wire up once DOM is ready — use event delegation on the pane
+  document.addEventListener('DOMContentLoaded',()=>{
+    const p=document.querySelector('.profile-pane');
+    if(p){ p.addEventListener('mousemove',onMove); p.addEventListener('mouseleave',onLeave); }
+  });
+  // Also wire immediately in case script runs after DOM
+  window.addEventListener('load',()=>{
+    const p=document.querySelector('.profile-pane');
+    if(p){ p.removeEventListener('mousemove',onMove); p.removeEventListener('mouseleave',onLeave);
+           p.addEventListener('mousemove',onMove); p.addEventListener('mouseleave',onLeave); }
+  });
+})();
 function updateResultsPanel(link){
   setR('r-link',`${nname(link.a)} ↔ ${nname(link.b)}`);
   setR('r-dist',(link.totalD/1000).toFixed(2)+' km');
@@ -1140,14 +1487,17 @@ function clearResults(){['r-link','r-dist','r-fz1','r-need','r-clear','r-maxelev
 
 // ── Utils ─────────────────────────────────────────────────────────────
 function setPill(id,txt,cls){const e=document.getElementById(id);e.textContent=txt;e.className='hpill '+(cls||'')}
+function ts(){ return new Date().toTimeString().slice(0,8); }
 function log(msg,type='linfo'){
   const el=document.getElementById('log');
   const d=document.createElement('div'); d.className=type;
-  d.textContent=`[${new Date().toTimeString().slice(0,8)}] ${msg}`;
+  d.textContent=`[${ts()}] ${msg}`;
   el.appendChild(d); el.scrollTop=el.scrollHeight;
 }
 
 window.addEventListener('resize',()=>{
+  const ov=document.getElementById('profileOverlay');
+  if(ov) ov.width=ov.width; // clear on resize
   if(selectedLink){const l=links.find(l=>l.id===selectedLink);if(l?.profile)showProfile(l)}
 });
 
