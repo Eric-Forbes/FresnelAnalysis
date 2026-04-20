@@ -1,9 +1,29 @@
 <!DOCTYPE html>
+<!-- ================================================================
+     Fresnel / Mesh Analyzer — index.html
+     Project : Airendil Networks · FresnelCalculator
+     ----------------------------------------------------------------
+     v1.0.0  2025-01-xx  Initial single-file release
+     v1.1.0  2025-01-xx  Mesh multi-node, auto-link, profile canvas
+     v1.2.0  2025-01-xx  Rename nodes, drag-reorder, KML import/export,
+                          distance labels on map, tooltips, coord entry,
+                          copy values, OpenTopoData APIs
+     v1.3.0  2025-01-xx  Open-Elevation as default source,
+                          smart gap-filling node numbering (reuses
+                          freed slot numbers on delete), saved to
+                          /Users/ericforbes/Documents/Airendil Networks/
+                          FresnelCalculator/FresnelAnalysis/index.html
+     v1.4.0  2025-01-xx  Sidebar fully scrollable (no more fixed-height
+                          sections), tooltip popover escapes sidebar via
+                          fixed positioning over map, double-click to add
+                          node (single-click = pan/select only),
+                          per-link hide/show toggle (● / ◌) in link list
+     ================================================================ -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fresnel / Mesh Analyzer</title>
+<title>Fresnel / Mesh Analyzer — Airendil Networks</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -31,10 +51,10 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
 
 .workspace{display:grid;grid-template-columns:300px 1fr;grid-template-rows:1fr 215px;flex:1;overflow:hidden}
 
-/* ── Sidebar ── */
-.sidebar{grid-row:1/3;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+/* ── Sidebar — fully scrollable as one column ── */
+.sidebar{grid-row:1/3;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
 .ss{border-bottom:1px solid var(--border);padding:10px 12px;flex-shrink:0}
-.ss.grow{flex:1;overflow-y:auto;flex-shrink:1;min-height:0}
+.ss.grow{flex-shrink:0}/* grow class kept for compat but sidebar itself scrolls */
 .slabel{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px}
 
 .field{margin-bottom:6px}
@@ -43,9 +63,10 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
 .field input:focus,.field select:focus{border-color:var(--accent2)}
 .field select option{background:var(--bg3)}
 
-/* Tooltip icon */
+/* Tooltip icon - popover positions via JS to avoid sidebar clip */
 .tip-icon{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:var(--border2);color:var(--muted);font-size:8px;cursor:help;font-family:var(--mono);position:relative;flex-shrink:0}
-.tip-icon:hover::after{content:attr(data-tip);position:absolute;left:18px;top:50%;transform:translateY(-50%);background:var(--bg2);border:1px solid var(--border2);border-radius:3px;padding:5px 8px;font-size:10px;color:var(--text);white-space:normal;width:200px;z-index:9999;line-height:1.5;font-family:var(--sans);pointer-events:none}
+/* Tooltip popover - absolutely positioned by JS, escapes sidebar overflow */
+#tipPopover{position:fixed;background:var(--bg2);border:1px solid var(--border2);border-radius:3px;padding:6px 9px;font-size:10px;color:var(--text);white-space:normal;width:220px;z-index:9999;line-height:1.5;font-family:var(--sans);pointer-events:none;display:none;box-shadow:0 4px 16px rgba(0,0,0,.4)}
 
 .btn{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.05em;padding:5px 10px;border-radius:3px;border:none;cursor:pointer;transition:all .15s}
 .btn-primary{background:var(--accent);color:#000;width:100%}
@@ -80,10 +101,13 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
 .link-item{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:3px;border:1px solid var(--border2);margin-bottom:3px;cursor:pointer;transition:all .15s;font-family:var(--mono);font-size:10px}
 .link-item:hover{border-color:var(--border)}
 .link-item.sel{border-color:var(--blue);background:rgba(59,139,212,.06)}
+.link-item.hidden-link{opacity:.4}
 .ldot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .lg{background:var(--accent)}.lw{background:var(--amber)}.lb{background:var(--red)}.lp{background:var(--muted)}
-.link-names{flex:1;color:var(--text)}
-.link-meta{color:var(--muted);font-size:9px}
+.link-names{flex:1;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.link-meta{color:var(--muted);font-size:9px;flex-shrink:0}
+.link-eye{background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px;padding:1px 3px;flex-shrink:0;line-height:1;transition:color .15s}
+.link-eye:hover{color:var(--text)}
 
 /* ── Results ── */
 .rrow{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:10px}
@@ -164,12 +188,12 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
     <div class="field">
       <label>API</label>
       <select id="srcType" onchange="updateSourceUI()">
-        <option value="otd-srtm30m" selected>OpenTopoData — SRTM 30m (free, global)</option>
+        <option value="open-elevation" selected>Open-Elevation SRTM (free, global)</option>
+        <option value="otd-srtm30m">OpenTopoData — SRTM 30m (free, global)</option>
         <option value="otd-aster30m">OpenTopoData — ASTER 30m (free, global)</option>
         <option value="otd-eudem25m">OpenTopoData — EU-DEM 25m (Europe only)</option>
         <option value="otd-ned10m">OpenTopoData — NED 10m (USA only)</option>
         <option value="otd-mapzen">OpenTopoData — Mapzen blended (global)</option>
-        <option value="open-elevation">Open-Elevation SRTM (free, global)</option>
         <option value="opentopo">OpenTopography (API key req.)</option>
         <option value="wcs">GeoServer WCS (local)</option>
         <option value="cog">COG backend proxy</option>
@@ -297,6 +321,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="tipPopover"></div>
 
 <script>
 // ── Palette ──────────────────────────────────────────────────────────
@@ -304,8 +329,21 @@ const COLORS=['#00e5a0','#f5a623','#3b8bd4','#9b7fe8','#e24b4a','#e879a0','#3dd6
 
 // ── State ────────────────────────────────────────────────────────────
 let nodes=[], links=[], selectedLink=null, mode='add', map;
-let nodeSeq=0, linkSeq=0;
+let linkSeq=0;
 let dragSrcIdx=null;
+
+// ── Smart node numbering ─────────────────────────────────────────────
+// Reuses the lowest free slot number when a node is deleted.
+// highWater only ever increases — existing node IDs never change.
+// nodeSeq is kept as a unique internal ID (always incrementing).
+let nodeSeq=0;
+let usedNums=new Set(), highWater=0;
+function nextNum(){
+  for(let n=1;n<=highWater;n++){ if(!usedNums.has(n)){usedNums.add(n);return n} }
+  highWater++; usedNums.add(highWater); return highWater;
+}
+function releaseNum(n){ usedNums.delete(n); }
+function resetNums(){ usedNums.clear(); highWater=0; }
 
 // ── Toast ────────────────────────────────────────────────────────────
 function toast(msg){
@@ -325,14 +363,33 @@ function copyCoordForm(){
   if(lat&&lon) copyText(`${lat}, ${lon}`);
 }
 
+// ── Tooltip popover (escapes sidebar overflow, floats over map) ───────
+(function(){
+  const pop=document.getElementById('tipPopover');
+  document.addEventListener('mouseover',e=>{
+    const icon=e.target.closest('.tip-icon');
+    if(!icon||!icon.dataset.tip) return;
+    pop.textContent=icon.dataset.tip;
+    const r=icon.getBoundingClientRect();
+    let left=r.right+10, top=r.top+r.height/2-20;
+    if(left>window.innerWidth-234) left=r.left-232;
+    pop.style.left=Math.max(4,left)+'px';
+    pop.style.top=Math.max(4,top)+'px';
+    pop.style.display='block';
+  });
+  document.addEventListener('mouseout',e=>{
+    if(e.target.closest('.tip-icon')) pop.style.display='none';
+  });
+})();
+
 // ── Map init ─────────────────────────────────────────────────────────
 function initMap(){
-  map=L.map('map',{zoomControl:true}).setView([40.1,-75.0],10);
+  map=L.map('map',{zoomControl:true,doubleClickZoom:false}).setView([40.1,-75.0],10);
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     {attribution:'© Esri',maxZoom:19}).addTo(map);
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
     {opacity:.4,maxZoom:19}).addTo(map);
-  map.on('click',onMapClick);
+  map.on('dblclick',onMapDblClick);
   updateSourceUI();
 }
 
@@ -341,7 +398,7 @@ function makeIcon(color,label){
     html:`<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,.65);display:flex;align-items:center;justify-content:center;font-family:'Azeret Mono',monospace;font-size:8px;font-weight:600;color:#000;box-shadow:0 0 8px rgba(0,0,0,.6)">${label}</div>`});
 }
 
-function onMapClick(e){
+function onMapDblClick(e){
   if(mode!=='add') return;
   addNode(e.latlng.lat, e.latlng.lng);
 }
@@ -351,7 +408,11 @@ function addNode(lat, lon, overrideName=null, overrideH=null){
   const idx=nodes.length, id=++nodeSeq;
   const color=COLORS[idx%COLORS.length];
   const antH=overrideH||+document.getElementById('defAntH').value||30;
-  const name=overrideName||`N${id}`;
+  // Allocate a display number (gap-filling). If overrideName is given we
+  // still allocate a num so the pool stays consistent; the name just
+  // won't use it visibly.
+  const num=nextNum();
+  const name=overrideName||`N${num}`;
 
   const marker=L.marker([lat,lon],{icon:makeIcon(color,name),draggable:true}).addTo(map);
   marker.bindTooltip(name,{permanent:true,direction:'top',offset:[0,-13],opacity:1});
@@ -363,7 +424,7 @@ function addNode(lat, lon, overrideName=null, overrideH=null){
     log(`${n.name} moved → ${n.lat.toFixed(5)}, ${n.lon.toFixed(5)}`,'linfo');
   });
 
-  const node={id,name,lat,lon,antH,color,marker};
+  const node={id,num,name,lat,lon,antH,color,marker};
   nodes.push(node);
 
   nodes.slice(0,-1).forEach(other=>addLink(node,other));
@@ -399,6 +460,8 @@ function renameNode(id, newName){
 
 function removeNode(id){
   const n=nodes.find(n=>n.id===id); if(!n) return;
+  // Release the display number back into the pool so it can be reused
+  releaseNum(n.num);
   map.removeLayer(n.marker);
   links.filter(l=>l.a===id||l.b===id).forEach(l=>{
     if(l.line) map.removeLayer(l.line);
@@ -440,7 +503,7 @@ function onDragEnd(){
 // ── Link management ──────────────────────────────────────────────────
 function addLink(a,b){
   const id=++linkSeq;
-  const link={id,a:a.id,b:b.id,profile:null,status:'pending',clearPct:null,minT:0.5,maxElev:0,totalD:0,lambda:null,line:null,distLabel:null};
+  const link={id,a:a.id,b:b.id,profile:null,status:'pending',clearPct:null,minT:0.5,maxElev:0,totalD:0,lambda:null,line:null,distLabel:null,hidden:false};
   redrawLine(link);
   updateDistLabel(link);
   links.push(link);
@@ -451,6 +514,7 @@ function redrawLine(link){
   const a=nodes.find(n=>n.id===link.a), b=nodes.find(n=>n.id===link.b);
   if(!a||!b) return;
   if(link.line) map.removeLayer(link.line);
+  if(link.hidden){ link.line=null; return; }
   const pal={pending:'#56687a',good:'#00e5a0',warn:'#f5a623',bad:'#e24b4a'};
   const isSel=selectedLink===link.id;
   link.line=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{
@@ -464,6 +528,7 @@ function updateDistLabel(link){
   const a=nodes.find(n=>n.id===link.a), b=nodes.find(n=>n.id===link.b);
   if(!a||!b) return;
   if(link.distLabel) map.removeLayer(link.distLabel);
+  if(link.hidden){ link.distLabel=null; return; }
   const midLat=(a.lat+b.lat)/2, midLon=(a.lon+b.lon)/2;
   const d=haversine(a.lat,a.lon,b.lat,b.lon)/1000;
   const txt=d<1?(d*1000).toFixed(0)+'m':d.toFixed(1)+'km';
@@ -496,7 +561,10 @@ function setMode(m){
 function updateTip(){
   const el=document.getElementById('mapTip');
   if(mode==='add'){
-    el.textContent=nodes.length===0?'Click map to place Node 1':`Click to add Node ${nodes.length+1}`;
+    // Preview which number the next node would get (lowest free slot)
+    let preview=highWater+1;
+    for(let n=1;n<=highWater;n++){ if(!usedNums.has(n)){preview=n;break} }
+    el.textContent=nodes.length===0?'Double-click map to place N1':`Double-click to add N${preview}`;
     el.classList.remove('hide');
   } else {
     el.textContent='Drag nodes to reposition'; el.classList.remove('hide');
@@ -508,6 +576,7 @@ function clearAll(){
   nodes.forEach(n=>map.removeLayer(n.marker));
   links.forEach(l=>{if(l.line)map.removeLayer(l.line);if(l.distLabel)map.removeLayer(l.distLabel)});
   nodes=[]; links=[]; selectedLink=null; nodeSeq=0; linkSeq=0;
+  resetNums();
   renderNodeList(); renderLinkList(); updateMeshPill(); updateTip();
   document.getElementById('profileEmpty').style.display='flex';
   clearResults(); log('Cleared','lwarn');
@@ -567,19 +636,37 @@ function fillCoordForm(id){
   document.getElementById('inp_name').value=n.name;
 }
 
+function toggleLinkHidden(id,e){
+  e.stopPropagation();
+  const link=links.find(l=>l.id===id); if(!link) return;
+  link.hidden=!link.hidden;
+  redrawLine(link);
+  updateDistLabel(link);
+  // If we just hid the selected link, clear profile view
+  if(link.hidden && selectedLink===id){
+    selectedLink=null;
+    document.getElementById('profileEmpty').style.display='flex';
+  }
+  renderLinkList();
+  log(`Link ${nname(link.a)}↔${nname(link.b)} ${link.hidden?'hidden':'shown'}`,'linfo');
+}
+
 function renderLinkList(){
   document.getElementById('linkCount').textContent=links.length;
   const el=document.getElementById('linkList'); el.innerHTML='';
   links.forEach(l=>{
     const d=document.createElement('div');
-    d.className='link-item'+(selectedLink===l.id?' sel':'');
+    const hiddenCls=l.hidden?' hidden-link':'';
+    d.className='link-item'+(selectedLink===l.id?' sel':'')+hiddenCls;
     const dc={pending:'lp',good:'lg',warn:'lw',bad:'lb'}[l.status];
     const pct=l.clearPct!=null?Math.round(l.clearPct)+'%':'—';
     const dist=l.totalD>0?((l.totalD/1000).toFixed(1)+'km'):'';
+    const eyeIcon=l.hidden?'👁️‍🗨️':'👁';
     d.innerHTML=`<div class="ldot ${dc}"></div>
       <div class="link-names">${nname(l.a)} ↔ ${nname(l.b)}</div>
-      <div class="link-meta">${dist} ${pct}</div>`;
-    d.onclick=()=>selectLink(l.id);
+      <div class="link-meta">${dist} ${pct}</div>
+      <button class="link-eye" title="${l.hidden?'Show link':'Hide link'}" onclick="toggleLinkHidden(${l.id},event)">${l.hidden?'◌':'●'}</button>`;
+    d.onclick=()=>{ if(!l.hidden) selectLink(l.id); };
     el.appendChild(d);
   });
 }
@@ -975,9 +1062,9 @@ window.addEventListener('resize',()=>{
 
 // ── Boot ──────────────────────────────────────────────────────────────
 initMap();
-log('Ready — click map to place nodes, links form automatically','lok');
-log('SRTM 30m (OpenTopoData) is default — no API key needed','linfo');
-log('Results values are clickable to copy · drag ⠿ to reorder nodes','linfo');
+log('Ready — double-click map to place nodes, links form automatically','lok');
+log('Default: Open-Elevation SRTM (free, global, no API key needed)','linfo');
+log('● = visible link · ◌ = hidden · node numbers fill gaps on delete','linfo');
 </script>
 </body>
 </html>
