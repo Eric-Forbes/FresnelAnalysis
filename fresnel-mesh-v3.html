@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fresnel / Mesh Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{
+  --bg:#090c0e;--bg2:#0f1317;--bg3:#161b1f;--panel:#181d22;
+  --border:#232a31;--border2:#2c3540;
+  --accent:#00e5a0;--accent2:#00b87a;
+  --amber:#f5a623;--red:#e24b4a;--blue:#3b8bd4;--purple:#9b7fe8;
+  --text:#cdd8e3;--muted:#56687a;
+  --mono:'Azeret Mono',monospace;--sans:'DM Sans',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+.logo{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--accent);letter-spacing:.12em}
+.logo span{color:var(--muted);font-weight:300}
+.hpill{font-family:var(--mono);font-size:9px;letter-spacing:.07em;padding:2px 8px;border-radius:2px;border:1px solid var(--border2);color:var(--muted);white-space:nowrap}
+.hpill.ok{border-color:var(--accent2);color:var(--accent)}
+.hpill.err{border-color:var(--red);color:var(--red)}
+.hpill.warn{border-color:var(--amber);color:var(--amber)}
+.spacer{flex:1}
+
+.workspace{display:grid;grid-template-columns:300px 1fr;grid-template-rows:1fr 215px;flex:1;overflow:hidden}
+
+/* ── Sidebar ── */
+.sidebar{grid-row:1/3;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.ss{border-bottom:1px solid var(--border);padding:10px 12px;flex-shrink:0}
+.ss.grow{flex:1;overflow-y:auto;flex-shrink:1;min-height:0}
+.slabel{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+
+.field{margin-bottom:6px}
+.field label{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);margin-bottom:3px;font-family:var(--mono)}
+.field input,.field select{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;padding:5px 7px;outline:none;transition:border-color .15s}
+.field input:focus,.field select:focus{border-color:var(--accent2)}
+.field select option{background:var(--bg3)}
+
+/* Tooltip icon */
+.tip-icon{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:var(--border2);color:var(--muted);font-size:8px;cursor:help;font-family:var(--mono);position:relative;flex-shrink:0}
+.tip-icon:hover::after{content:attr(data-tip);position:absolute;left:18px;top:50%;transform:translateY(-50%);background:var(--bg2);border:1px solid var(--border2);border-radius:3px;padding:5px 8px;font-size:10px;color:var(--text);white-space:normal;width:200px;z-index:9999;line-height:1.5;font-family:var(--sans);pointer-events:none}
+
+.btn{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.05em;padding:5px 10px;border-radius:3px;border:none;cursor:pointer;transition:all .15s}
+.btn-primary{background:var(--accent);color:#000;width:100%}
+.btn-primary:hover{background:#1fffc0}
+.btn-primary:disabled{background:var(--border2);color:var(--muted);cursor:not-allowed}
+.btn-sm{background:var(--bg3);border:1px solid var(--border2);color:var(--muted);font-size:9px;padding:3px 8px}
+.btn-sm:hover{color:var(--text);border-color:var(--accent2)}
+.btn-sm.active{border-color:var(--accent);color:var(--accent)}
+.btn-icon{background:transparent;border:none;cursor:pointer;color:var(--muted);font-size:11px;padding:2px 4px;border-radius:2px;transition:color .15s}
+.btn-icon:hover{color:var(--text)}
+.btn-danger{background:transparent;border:1px solid var(--red);color:var(--red);font-size:9px;padding:3px 8px;width:100%;margin-top:5px;border-radius:3px;cursor:pointer;font-family:var(--mono);font-weight:500;letter-spacing:.04em;transition:all .15s}
+.btn-danger:hover{background:rgba(226,75,74,.1)}
+
+/* ── Node list with drag-reorder ── */
+.node-item{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:3px;border:1px solid var(--border2);margin-bottom:3px;cursor:pointer;transition:all .15s;user-select:none}
+.node-item:hover{border-color:var(--border)}
+.node-item.sel{border-color:var(--accent2);background:rgba(0,229,160,.04)}
+.node-item.drag-over{border-color:var(--accent);background:rgba(0,229,160,.08)}
+.node-item.dragging{opacity:.4}
+.drag-handle{color:var(--muted);font-size:11px;cursor:grab;padding:0 2px;flex-shrink:0}
+.drag-handle:active{cursor:grabbing}
+.node-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.2)}
+.node-info{flex:1;min-width:0}
+.node-name-wrap{display:flex;align-items:center;gap:4px}
+.node-name{font-family:var(--mono);font-size:10px;font-weight:500;min-width:0}
+.node-name-input{font-family:var(--mono);font-size:10px;font-weight:500;background:transparent;border:none;border-bottom:1px solid var(--accent2);outline:none;color:var(--text);width:80px;padding:0}
+.node-coord{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-actions{display:flex;gap:1px;opacity:0;transition:opacity .15s}
+.node-item:hover .node-actions{opacity:1}
+
+/* ── Link list ── */
+.link-item{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:3px;border:1px solid var(--border2);margin-bottom:3px;cursor:pointer;transition:all .15s;font-family:var(--mono);font-size:10px}
+.link-item:hover{border-color:var(--border)}
+.link-item.sel{border-color:var(--blue);background:rgba(59,139,212,.06)}
+.ldot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.lg{background:var(--accent)}.lw{background:var(--amber)}.lb{background:var(--red)}.lp{background:var(--muted)}
+.link-names{flex:1;color:var(--text)}
+.link-meta{color:var(--muted);font-size:9px}
+
+/* ── Results ── */
+.rrow{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:10px}
+.rrow:last-child{border-bottom:none}
+.rkey{color:var(--muted)}
+.rval{color:var(--text);cursor:pointer}
+.rval:hover{color:var(--accent)}
+.rval.good{color:var(--accent)}.rval.warn{color:var(--amber)}.rval.bad{color:var(--red)}
+
+/* ── Coord entry panel ── */
+.coord-panel{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:8px 10px;margin-bottom:6px}
+.coord-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px}
+.coord-field{display:flex;flex-direction:column;gap:2px}
+.coord-field label{font-family:var(--mono);font-size:9px;color:var(--muted)}
+.coord-field input{background:var(--bg2);border:1px solid var(--border2);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 6px;outline:none;width:100%}
+.coord-field input:focus{border-color:var(--accent2)}
+
+/* ── Log ── */
+.log{font-family:var(--mono);font-size:9px;line-height:1.8;color:var(--muted);max-height:75px;overflow-y:auto;padding-top:4px}
+.lok{color:var(--accent2)}.lwarn{color:var(--amber)}.lerr{color:var(--red)}.linfo{color:var(--blue)}
+
+/* ── Map ── */
+#map{background:var(--bg3);position:relative}
+.map-tip{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(9,12,14,.9);border:1px solid var(--border2);border-radius:3px;padding:5px 12px;font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:.05em;z-index:500;pointer-events:none;white-space:nowrap;transition:opacity .4s}
+.map-tip.hide{opacity:0}
+
+/* Link distance labels on map */
+.dist-label{background:rgba(9,12,14,.82);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:2px 7px;font-family:'Azeret Mono',monospace;font-size:10px;color:#cdd8e3;white-space:nowrap;pointer-events:none}
+
+/* ── Profile ── */
+.profile-pane{border-top:1px solid var(--border);background:var(--bg2);position:relative;overflow:hidden}
+#profileCanvas{width:100%;height:100%;display:block}
+.profile-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em;pointer-events:none}
+.profile-header{position:absolute;top:0;left:0;right:0;height:26px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;z-index:2;pointer-events:none;background:linear-gradient(to bottom,rgba(15,19,23,.95) 65%,transparent)}
+.profile-title{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.plegend{display:flex;gap:11px;align-items:center}
+.pleg{display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9px;color:var(--muted)}
+.pleg-line{width:14px;height:2px;border-radius:1px;flex-shrink:0}
+.pleg-dash{width:14px;flex-shrink:0;border-top:2px dashed}
+
+/* Leaflet overrides */
+.leaflet-control-zoom a{background:var(--panel)!important;color:var(--text)!important;border-color:var(--border2)!important}
+.leaflet-control-zoom a:hover{background:var(--bg3)!important}
+.leaflet-popup-content-wrapper{background:var(--panel);color:var(--text);border:1px solid var(--border2);border-radius:3px;font-family:var(--mono);font-size:10px;box-shadow:none}
+.leaflet-popup-tip{background:var(--panel)}
+.leaflet-div-icon{background:none;border:none}
+
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+.spinner{display:inline-block;width:9px;height:9px;border:1.5px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--accent2);border-radius:3px;padding:6px 14px;font-family:var(--mono);font-size:10px;color:var(--accent);z-index:9999;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+
+/* KML file input hidden */
+#kmlInput{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">FRESNEL<span>/MESH</span></div>
+  <div class="hpill" id="srcPill">NO SOURCE</div>
+  <div class="hpill" id="modePill">ADD NODE</div>
+  <div class="spacer"></div>
+  <div class="hpill" id="meshPill">0 NODES · 0 LINKS</div>
+</header>
+
+<div class="workspace">
+<aside class="sidebar">
+
+  <!-- Source -->
+  <div class="ss">
+    <div class="slabel">Elevation Source</div>
+    <div class="field">
+      <label>API</label>
+      <select id="srcType" onchange="updateSourceUI()">
+        <option value="otd-srtm30m" selected>OpenTopoData — SRTM 30m (free, global)</option>
+        <option value="otd-aster30m">OpenTopoData — ASTER 30m (free, global)</option>
+        <option value="otd-eudem25m">OpenTopoData — EU-DEM 25m (Europe only)</option>
+        <option value="otd-ned10m">OpenTopoData — NED 10m (USA only)</option>
+        <option value="otd-mapzen">OpenTopoData — Mapzen blended (global)</option>
+        <option value="open-elevation">Open-Elevation SRTM (free, global)</option>
+        <option value="opentopo">OpenTopography (API key req.)</option>
+        <option value="wcs">GeoServer WCS (local)</option>
+        <option value="cog">COG backend proxy</option>
+      </select>
+    </div>
+    <div id="srcExtra"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+      <button class="btn btn-sm" onclick="testSource()" id="testBtn">TEST SOURCE</button>
+      <button class="btn btn-sm" onclick="analyzeAll()" id="analyzeBtn">ANALYZE ALL</button>
+    </div>
+  </div>
+
+  <!-- Mode + Settings -->
+  <div class="ss">
+    <div class="slabel">Settings</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px">
+      <button class="btn btn-sm active" id="modeAddBtn" onclick="setMode('add')">+ Add Node</button>
+      <button class="btn btn-sm" id="modeMoveBtn" onclick="setMode('move')">↖ Move Node</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+      <div class="field"><label>Frequency (MHz)</label><input type="number" id="freq" value="900" min="50" max="80000"></div>
+      <div class="field"><label>Default ant. ht (m)</label><input type="number" id="defAntH" value="30" min="1" max="500"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+      <div class="field">
+        <label>
+          Profile samples
+          <span class="tip-icon" data-tip="Number of elevation points sampled along each link. More = smoother profile and better accuracy, but slower API calls. 200 is a good balance. Max 512.">?</span>
+        </label>
+        <input type="number" id="nsamples" value="200" min="64" max="512">
+      </div>
+      <div class="field">
+        <label>
+          k-factor
+          <span class="tip-icon" data-tip="Effective Earth radius multiplier accounting for atmospheric refraction. Standard atmosphere = 4/3 (1.333). Use 1.0 for flat-earth (no refraction). Values below 1.0 cause super-refraction. Affects earth bulge correction in the LOS calculation.">?</span>
+        </label>
+        <input type="number" id="kfactor" value="1.333" step="0.001">
+      </div>
+    </div>
+  </div>
+
+  <!-- Add by Coordinates -->
+  <div class="ss">
+    <div class="slabel">Add / Edit by Coordinates</div>
+    <div class="coord-panel">
+      <div class="coord-row">
+        <div class="coord-field"><label>Latitude (decimal°)</label><input type="number" id="inp_lat" step="0.00001" placeholder="40.05000"></div>
+        <div class="coord-field"><label>Longitude (decimal°)</label><input type="number" id="inp_lon" step="0.00001" placeholder="-75.10000"></div>
+      </div>
+      <div class="coord-row" style="margin-bottom:0">
+        <div class="coord-field"><label>Ant. height (m)</label><input type="number" id="inp_h" value="30" min="1" max="500"></div>
+        <div class="coord-field"><label>Name (optional)</label><input type="text" id="inp_name" placeholder="Node name"></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+      <button class="btn btn-sm" onclick="addNodeFromForm()">+ Add Node</button>
+      <button class="btn btn-sm" onclick="copyCoordForm()">⎘ Copy</button>
+    </div>
+  </div>
+
+  <!-- KML Import/Export -->
+  <div class="ss">
+    <div class="slabel">KML</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+      <button class="btn btn-sm" onclick="exportKML()">↓ Export KML</button>
+      <button class="btn btn-sm" onclick="document.getElementById('kmlInput').click()">↑ Import KML</button>
+    </div>
+    <input type="file" id="kmlInput" accept=".kml" onchange="importKML(event)">
+  </div>
+
+  <!-- Nodes -->
+  <div class="ss">
+    <div class="slabel">
+      Nodes <span id="nodeCount" style="color:var(--accent)">0</span>
+      <span style="color:var(--muted);font-size:9px;font-weight:300;margin-left:4px">drag to reorder</span>
+    </div>
+    <div id="nodeList"></div>
+    <button class="btn-danger" onclick="clearAll()">CLEAR ALL</button>
+  </div>
+
+  <!-- Links -->
+  <div class="ss">
+    <div class="slabel">Links <span id="linkCount" style="color:var(--blue)">0</span></div>
+    <div id="linkList"></div>
+  </div>
+
+  <!-- Results + Log -->
+  <div class="ss grow">
+    <div class="slabel">Selected Link</div>
+    <div id="results">
+      <div class="rrow"><span class="rkey">Link</span><span class="rval" id="r-link" title="click to copy" onclick="copyVal(this)">—</span></div>
+      <div class="rrow"><span class="rkey">Distance</span><span class="rval" id="r-dist" onclick="copyVal(this)">—</span></div>
+      <div class="rrow"><span class="rkey">FZ1 mid radius</span><span class="rval" id="r-fz1" onclick="copyVal(this)">—</span></div>
+      <div class="rrow"><span class="rkey">60% clearance req.</span><span class="rval" id="r-need" onclick="copyVal(this)">—</span></div>
+      <div class="rrow"><span class="rkey">Min clearance</span><span class="rval" id="r-clear" onclick="copyVal(this)">—</span></div>
+      <div class="rrow"><span class="rkey">Max terrain elev.</span><span class="rval" id="r-maxelev" onclick="copyVal(this)">—</span></div>
+      <div class="rrow"><span class="rkey">Critical point</span><span class="rval" id="r-obsloc" onclick="copyVal(this)">—</span></div>
+      <div class="rrow"><span class="rkey">Status</span><span class="rval" id="r-status">—</span></div>
+    </div>
+    <div class="log" id="log" style="margin-top:7px"></div>
+  </div>
+
+</aside>
+
+<!-- Map -->
+<div id="map">
+  <div class="map-tip" id="mapTip">Click map to place Node 1</div>
+</div>
+
+<!-- Profile -->
+<div class="profile-pane">
+  <div class="profile-header">
+    <div class="profile-title" id="profileTitle">TERRAIN PROFILE</div>
+    <div class="plegend">
+      <div class="pleg"><div class="pleg-line" style="background:#3b8bd4"></div>LOS</div>
+      <div class="pleg"><div class="pleg-dash" style="border-color:rgba(245,166,35,.7)"></div>FZ1</div>
+      <div class="pleg"><div class="pleg-line" style="background:#639922"></div>Terrain</div>
+      <div class="pleg"><div class="pleg-line" style="background:rgba(226,75,74,.7)"></div>Violation</div>
+      <div class="pleg"><div class="pleg-dash" style="border-color:rgba(255,255,255,.2)"></div>60% FZ1</div>
+    </div>
+  </div>
+  <canvas id="profileCanvas"></canvas>
+  <div class="profile-empty" id="profileEmpty">Select a link or click Analyze All</div>
+</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Palette ──────────────────────────────────────────────────────────
+const COLORS=['#00e5a0','#f5a623','#3b8bd4','#9b7fe8','#e24b4a','#e879a0','#3dd6e0','#f0c040'];
+
+// ── State ────────────────────────────────────────────────────────────
+let nodes=[], links=[], selectedLink=null, mode='add', map;
+let nodeSeq=0, linkSeq=0;
+let dragSrcIdx=null;
+
+// ── Toast ────────────────────────────────────────────────────────────
+function toast(msg){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),1800);
+}
+
+// ── Copy helpers ─────────────────────────────────────────────────────
+function copyText(txt){
+  navigator.clipboard.writeText(txt).then(()=>toast('Copied: '+txt)).catch(()=>toast('Copy failed'));
+}
+function copyVal(el){ if(el.textContent!=='—') copyText(el.textContent); }
+function copyCoordForm(){
+  const lat=document.getElementById('inp_lat').value;
+  const lon=document.getElementById('inp_lon').value;
+  if(lat&&lon) copyText(`${lat}, ${lon}`);
+}
+
+// ── Map init ─────────────────────────────────────────────────────────
+function initMap(){
+  map=L.map('map',{zoomControl:true}).setView([40.1,-75.0],10);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {attribution:'© Esri',maxZoom:19}).addTo(map);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    {opacity:.4,maxZoom:19}).addTo(map);
+  map.on('click',onMapClick);
+  updateSourceUI();
+}
+
+function makeIcon(color,label){
+  return L.divIcon({className:'',iconSize:[22,22],iconAnchor:[11,11],
+    html:`<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,.65);display:flex;align-items:center;justify-content:center;font-family:'Azeret Mono',monospace;font-size:8px;font-weight:600;color:#000;box-shadow:0 0 8px rgba(0,0,0,.6)">${label}</div>`});
+}
+
+function onMapClick(e){
+  if(mode!=='add') return;
+  addNode(e.latlng.lat, e.latlng.lng);
+}
+
+// ── Node management ──────────────────────────────────────────────────
+function addNode(lat, lon, overrideName=null, overrideH=null){
+  const idx=nodes.length, id=++nodeSeq;
+  const color=COLORS[idx%COLORS.length];
+  const antH=overrideH||+document.getElementById('defAntH').value||30;
+  const name=overrideName||`N${id}`;
+
+  const marker=L.marker([lat,lon],{icon:makeIcon(color,name),draggable:true}).addTo(map);
+  marker.bindTooltip(name,{permanent:true,direction:'top',offset:[0,-13],opacity:1});
+  marker.on('dragend',e=>{
+    const n=nodes.find(n=>n.id===id); if(!n) return;
+    n.lat=e.target.getLatLng().lat; n.lon=e.target.getLatLng().lng;
+    links.filter(l=>l.a===id||l.b===id).forEach(l=>{l.status='pending';l.profile=null;redrawLine(l);updateDistLabel(l)});
+    renderNodeList(); renderLinkList();
+    log(`${n.name} moved → ${n.lat.toFixed(5)}, ${n.lon.toFixed(5)}`,'linfo');
+  });
+
+  const node={id,name,lat,lon,antH,color,marker};
+  nodes.push(node);
+
+  nodes.slice(0,-1).forEach(other=>addLink(node,other));
+  renderNodeList(); renderLinkList(); updateMeshPill(); updateTip();
+  log(`Added ${name} at ${lat.toFixed(5)}, ${lon.toFixed(5)}`,'lok');
+  if(nodes.length>=2) map.fitBounds(nodes.map(n=>[n.lat,n.lon]),{padding:[50,50]});
+  return node;
+}
+
+function addNodeFromForm(){
+  const lat=parseFloat(document.getElementById('inp_lat').value);
+  const lon=parseFloat(document.getElementById('inp_lon').value);
+  const h=parseFloat(document.getElementById('inp_h').value)||30;
+  const name=document.getElementById('inp_name').value.trim()||null;
+  if(isNaN(lat)||isNaN(lon)){toast('Enter valid lat/lon'); return}
+  if(lat<-90||lat>90||lon<-180||lon>180){toast('Coordinates out of range'); return}
+  const n=addNode(lat,lon,name,h);
+  document.getElementById('inp_lat').value='';
+  document.getElementById('inp_lon').value='';
+  document.getElementById('inp_name').value='';
+  map.panTo([n.lat,n.lon]);
+}
+
+function renameNode(id, newName){
+  const n=nodes.find(n=>n.id===id); if(!n||!newName.trim()) return;
+  n.name=newName.trim();
+  n.marker.setIcon(makeIcon(n.color,n.name));
+  n.marker.setTooltipContent(n.name);
+  renderNodeList(); renderLinkList();
+  links.filter(l=>l.a===id||l.b===id).forEach(l=>updateDistLabel(l));
+  log(`Renamed to ${n.name}`,'linfo');
+}
+
+function removeNode(id){
+  const n=nodes.find(n=>n.id===id); if(!n) return;
+  map.removeLayer(n.marker);
+  links.filter(l=>l.a===id||l.b===id).forEach(l=>{
+    if(l.line) map.removeLayer(l.line);
+    if(l.distLabel) map.removeLayer(l.distLabel);
+  });
+  links=links.filter(l=>l.a!==id&&l.b!==id);
+  nodes=nodes.filter(n=>n.id!==id);
+  if(selectedLink&&!links.find(l=>l.id===selectedLink)){
+    selectedLink=null; document.getElementById('profileEmpty').style.display='flex';
+  }
+  renderNodeList(); renderLinkList(); updateMeshPill(); updateTip();
+  log(`Removed ${n.name}`,'lwarn');
+}
+
+// ── Drag-to-reorder ──────────────────────────────────────────────────
+function onDragStart(e, idx){
+  dragSrcIdx=idx;
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed='move';
+}
+function onDragOver(e, idx){
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  document.querySelectorAll('.node-item').forEach((el,i)=>el.classList.toggle('drag-over',i===idx&&i!==dragSrcIdx));
+}
+function onDragLeave(e){ e.currentTarget.classList.remove('drag-over'); }
+function onDrop(e, idx){
+  e.preventDefault();
+  if(dragSrcIdx===null||dragSrcIdx===idx) return;
+  const moved=nodes.splice(dragSrcIdx,1)[0];
+  nodes.splice(idx,0,moved);
+  renderNodeList(); renderLinkList();
+}
+function onDragEnd(){
+  dragSrcIdx=null;
+  document.querySelectorAll('.node-item').forEach(el=>el.classList.remove('dragging','drag-over'));
+}
+
+// ── Link management ──────────────────────────────────────────────────
+function addLink(a,b){
+  const id=++linkSeq;
+  const link={id,a:a.id,b:b.id,profile:null,status:'pending',clearPct:null,minT:0.5,maxElev:0,totalD:0,lambda:null,line:null,distLabel:null};
+  redrawLine(link);
+  updateDistLabel(link);
+  links.push(link);
+  return link;
+}
+
+function redrawLine(link){
+  const a=nodes.find(n=>n.id===link.a), b=nodes.find(n=>n.id===link.b);
+  if(!a||!b) return;
+  if(link.line) map.removeLayer(link.line);
+  const pal={pending:'#56687a',good:'#00e5a0',warn:'#f5a623',bad:'#e24b4a'};
+  const isSel=selectedLink===link.id;
+  link.line=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{
+    color:pal[link.status]||'#56687a', weight:isSel?2.5:1.5,
+    opacity:isSel?.95:.55, dashArray:link.status==='pending'?'5 4':null
+  }).addTo(map);
+  link.line.on('click',()=>selectLink(link.id));
+}
+
+function updateDistLabel(link){
+  const a=nodes.find(n=>n.id===link.a), b=nodes.find(n=>n.id===link.b);
+  if(!a||!b) return;
+  if(link.distLabel) map.removeLayer(link.distLabel);
+  const midLat=(a.lat+b.lat)/2, midLon=(a.lon+b.lon)/2;
+  const d=haversine(a.lat,a.lon,b.lat,b.lon)/1000;
+  const txt=d<1?(d*1000).toFixed(0)+'m':d.toFixed(1)+'km';
+  link.distLabel=L.marker([midLat,midLon],{
+    icon:L.divIcon({className:'dist-label',html:txt,iconAnchor:[30,10]}),
+    interactive:false
+  }).addTo(map);
+}
+
+function selectLink(id){
+  selectedLink=id;
+  renderLinkList();
+  links.forEach(l=>redrawLine(l));
+  const link=links.find(l=>l.id===id);
+  if(link?.profile){ showProfile(link); updateResultsPanel(link); }
+  else if(link) log(`${nname(link.a)}↔${nname(link.b)}: not analyzed yet`,'lwarn');
+}
+
+function nname(id){ return nodes.find(n=>n.id===id)?.name||'?'; }
+
+function setMode(m){
+  mode=m;
+  document.getElementById('modeAddBtn').classList.toggle('active',m==='add');
+  document.getElementById('modeMoveBtn').classList.toggle('active',m==='move');
+  document.getElementById('modePill').textContent=m==='add'?'ADD NODE':'MOVE NODE';
+  nodes.forEach(n=>n.marker.dragging[m==='move'?'enable':'disable']());
+  updateTip();
+}
+
+function updateTip(){
+  const el=document.getElementById('mapTip');
+  if(mode==='add'){
+    el.textContent=nodes.length===0?'Click map to place Node 1':`Click to add Node ${nodes.length+1}`;
+    el.classList.remove('hide');
+  } else {
+    el.textContent='Drag nodes to reposition'; el.classList.remove('hide');
+    setTimeout(()=>el.classList.add('hide'),2800);
+  }
+}
+
+function clearAll(){
+  nodes.forEach(n=>map.removeLayer(n.marker));
+  links.forEach(l=>{if(l.line)map.removeLayer(l.line);if(l.distLabel)map.removeLayer(l.distLabel)});
+  nodes=[]; links=[]; selectedLink=null; nodeSeq=0; linkSeq=0;
+  renderNodeList(); renderLinkList(); updateMeshPill(); updateTip();
+  document.getElementById('profileEmpty').style.display='flex';
+  clearResults(); log('Cleared','lwarn');
+}
+
+// ── Render ───────────────────────────────────────────────────────────
+function renderNodeList(){
+  document.getElementById('nodeCount').textContent=nodes.length;
+  const el=document.getElementById('nodeList'); el.innerHTML='';
+  nodes.forEach((n,idx)=>{
+    const d=document.createElement('div');
+    d.className='node-item'; d.draggable=true;
+    d.dataset.idx=idx;
+    d.addEventListener('dragstart',e=>onDragStart(e,idx));
+    d.addEventListener('dragover',e=>onDragOver(e,idx));
+    d.addEventListener('dragleave',onDragLeave);
+    d.addEventListener('drop',e=>onDrop(e,idx));
+    d.addEventListener('dragend',onDragEnd);
+    d.innerHTML=`
+      <div class="drag-handle">⠿</div>
+      <div class="node-dot" style="background:${n.color}"></div>
+      <div class="node-info" onclick="map.panTo([${n.lat},${n.lon}])">
+        <div class="node-name-wrap">
+          <span class="node-name" style="color:${n.color}" id="nn-${n.id}">${n.name}</span>
+          <button class="btn-icon" style="font-size:9px" onclick="event.stopPropagation();startRename(${n.id})" title="Rename">✎</button>
+        </div>
+        <div class="node-coord">${n.lat.toFixed(5)}, ${n.lon.toFixed(5)} · ${n.antH}m
+          <button class="btn-icon" style="font-size:9px" onclick="event.stopPropagation();copyText('${n.lat.toFixed(5)}, ${n.lon.toFixed(5)}')" title="Copy coords">⎘</button>
+        </div>
+      </div>
+      <div class="node-actions">
+        <button class="btn-icon" onclick="event.stopPropagation();fillCoordForm(${n.id})" title="Edit in form">⊞</button>
+        <button class="btn-icon" style="color:var(--red)" onclick="event.stopPropagation();removeNode(${n.id})" title="Delete">✕</button>
+      </div>`;
+    el.appendChild(d);
+  });
+}
+
+function startRename(id){
+  const span=document.getElementById('nn-'+id); if(!span) return;
+  const n=nodes.find(n=>n.id===id); if(!n) return;
+  const input=document.createElement('input');
+  input.className='node-name-input'; input.value=n.name;
+  input.style.color=n.color;
+  span.replaceWith(input);
+  input.focus(); input.select();
+  const commit=()=>{ const v=input.value.trim(); if(v) renameNode(id,v); else renderNodeList(); };
+  input.addEventListener('blur',commit);
+  input.addEventListener('keydown',e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape'){ input.value=n.name; input.blur(); }});
+}
+
+function fillCoordForm(id){
+  const n=nodes.find(n=>n.id===id); if(!n) return;
+  document.getElementById('inp_lat').value=n.lat.toFixed(5);
+  document.getElementById('inp_lon').value=n.lon.toFixed(5);
+  document.getElementById('inp_h').value=n.antH;
+  document.getElementById('inp_name').value=n.name;
+}
+
+function renderLinkList(){
+  document.getElementById('linkCount').textContent=links.length;
+  const el=document.getElementById('linkList'); el.innerHTML='';
+  links.forEach(l=>{
+    const d=document.createElement('div');
+    d.className='link-item'+(selectedLink===l.id?' sel':'');
+    const dc={pending:'lp',good:'lg',warn:'lw',bad:'lb'}[l.status];
+    const pct=l.clearPct!=null?Math.round(l.clearPct)+'%':'—';
+    const dist=l.totalD>0?((l.totalD/1000).toFixed(1)+'km'):'';
+    d.innerHTML=`<div class="ldot ${dc}"></div>
+      <div class="link-names">${nname(l.a)} ↔ ${nname(l.b)}</div>
+      <div class="link-meta">${dist} ${pct}</div>`;
+    d.onclick=()=>selectLink(l.id);
+    el.appendChild(d);
+  });
+}
+
+function updateMeshPill(){
+  document.getElementById('meshPill').textContent=`${nodes.length} NODES · ${links.length} LINKS`;
+}
+
+// ── KML Export ───────────────────────────────────────────────────────
+function exportKML(){
+  if(!nodes.length){toast('No nodes to export'); return}
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let kml=`<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>Fresnel Mesh Network</name>
+  <description>Exported from Fresnel/Mesh Analyzer</description>\n`;
+
+  // Styles
+  COLORS.forEach((c,i)=>{
+    const hex=c.replace('#','');
+    kml+=`  <Style id="node${i}"><IconStyle><color>ff${hex.slice(4,6)}${hex.slice(2,4)}${hex.slice(0,2)}</color><scale>0.8</scale></IconStyle><LabelStyle><scale>0.7</scale></LabelStyle></Style>\n`;
+  });
+  kml+=`  <Style id="link-good"><LineStyle><color>ff00e5a0</color><width>2</width></LineStyle></Style>\n`;
+  kml+=`  <Style id="link-warn"><LineStyle><color>ff23a6f5</color><width>2</width></LineStyle></Style>\n`;
+  kml+=`  <Style id="link-bad"><LineStyle><color>ff4a4be2</color><width>2</width></LineStyle></Style>\n`;
+  kml+=`  <Style id="link-pending"><LineStyle><color>ff7a6856</color><width>1</width></LineStyle></Style>\n`;
+
+  // Folder: Nodes
+  kml+=`  <Folder><name>Nodes</name>\n`;
+  nodes.forEach((n,i)=>{
+    kml+=`    <Placemark>
+      <name>${esc(n.name)}</name>
+      <description>Lat: ${n.lat.toFixed(5)}, Lon: ${n.lon.toFixed(5)}, Ant Height: ${n.antH}m</description>
+      <styleUrl>#node${i%COLORS.length}</styleUrl>
+      <ExtendedData>
+        <Data name="antH"><value>${n.antH}</value></Data>
+        <Data name="nodeId"><value>${n.id}</value></Data>
+      </ExtendedData>
+      <Point><coordinates>${n.lon.toFixed(6)},${n.lat.toFixed(6)},0</coordinates></Point>
+    </Placemark>\n`;
+  });
+  kml+=`  </Folder>\n`;
+
+  // Folder: Links
+  if(links.length){
+    kml+=`  <Folder><name>Links</name>\n`;
+    links.forEach(l=>{
+      const a=nodes.find(n=>n.id===l.a), b=nodes.find(n=>n.id===l.b);
+      if(!a||!b) return;
+      const dist=l.totalD>0?(l.totalD/1000).toFixed(2)+'km':'';
+      const pct=l.clearPct!=null?Math.round(l.clearPct)+'% FZ1':'unanalyzed';
+      kml+=`    <Placemark>
+      <name>${esc(a.name)} ↔ ${esc(b.name)}</name>
+      <description>Distance: ${dist} | Clearance: ${pct} | Status: ${l.status}</description>
+      <styleUrl>#link-${l.status}</styleUrl>
+      <LineString><tessellate>1</tessellate>
+        <coordinates>${a.lon.toFixed(6)},${a.lat.toFixed(6)},0 ${b.lon.toFixed(6)},${b.lat.toFixed(6)},0</coordinates>
+      </LineString>
+    </Placemark>\n`;
+    });
+    kml+=`  </Folder>\n`;
+  }
+
+  kml+=`</Document>\n</kml>`;
+  const blob=new Blob([kml],{type:'application/vnd.google-earth.kml+xml'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='fresnel_mesh.kml'; a.click();
+  log('KML exported','lok');
+}
+
+// ── KML Import ───────────────────────────────────────────────────────
+function importKML(event){
+  const file=event.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const parser=new DOMParser();
+      const doc=parser.parseFromString(e.target.result,'application/xml');
+      const placemarks=doc.querySelectorAll('Placemark');
+      let count=0;
+      placemarks.forEach(pm=>{
+        const pt=pm.querySelector('Point');
+        if(!pt) return; // skip LineStrings (links)
+        const coords=pt.querySelector('coordinates')?.textContent?.trim();
+        if(!coords) return;
+        const [lon,lat]=coords.split(',').map(Number);
+        if(isNaN(lat)||isNaN(lon)) return;
+        const name=pm.querySelector('name')?.textContent?.trim()||null;
+        const antHEl=pm.querySelector('Data[name="antH"] value');
+        const antH=antHEl?parseFloat(antHEl.textContent):null;
+        addNode(lat,lon,name,antH);
+        count++;
+      });
+      log(`Imported ${count} node(s) from KML`,'lok');
+      if(nodes.length>=2) map.fitBounds(nodes.map(n=>[n.lat,n.lon]),{padding:[50,50]});
+    }catch(err){
+      log(`KML parse error: ${err.message}`,'lerr');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value=''; // allow re-import same file
+}
+
+// ── Source UI ─────────────────────────────────────────────────────────
+function updateSourceUI(){
+  const t=document.getElementById('srcType').value;
+  const tpl={
+    'otd-srtm30m':'','otd-aster30m':'','otd-mapzen':'',
+    'open-elevation':'',
+    'otd-eudem25m':'<p style="font-size:9px;color:var(--muted);margin-bottom:5px">⚠ Europe coverage only</p>',
+    'otd-ned10m':'<p style="font-size:9px;color:var(--muted);margin-bottom:5px">⚠ USA coverage only · 10m res</p>',
+    'opentopo':`<div class="field"><label>API Key</label><input id="src_apikey" placeholder="your_key"></div>
+                <div class="field"><label>DEM</label><select id="src_dem"><option value="COP30">Copernicus 30m</option><option value="SRTMGL1">SRTM 1-arc</option><option value="SRTMGL3">SRTM 3-arc</option></select></div>`,
+    'wcs':`<div class="field"><label>GeoServer URL</label><input id="src_url" value="http://localhost:8080/geoserver/ows"></div>
+           <div class="field"><label>Coverage ID</label><input id="src_cov" value="ws:elevation"></div>`,
+    'cog':`<div class="field"><label>COG URL</label><input id="src_url" placeholder="http://host/elev_cog.tif"></div>`
+  };
+  document.getElementById('srcExtra').innerHTML=tpl[t]||'';
+}
+
+// ── Elevation APIs ────────────────────────────────────────────────────
+const chunk=(arr,n)=>{const o=[];for(let i=0;i<arr.length;i+=n)o.push(arr.slice(i,i+n));return o};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+async function fetchElevations(points){
+  const t=document.getElementById('srcType').value;
+
+  if(t==='open-elevation'){
+    const elevs=[];
+    for(const ch of chunk(points,100)){
+      const r=await fetch('https://api.open-elevation.com/api/v1/lookup',{method:'POST',
+        headers:{'Content-Type':'application/json','Accept':'application/json'},
+        body:JSON.stringify({locations:ch.map(p=>({latitude:p.lat,longitude:p.lon}))})});
+      if(!r.ok) throw new Error(`open-elevation ${r.status}`);
+      (await r.json()).results.forEach(x=>elevs.push(x.elevation));
+    }
+    return elevs;
+  }
+
+  if(t.startsWith('otd-')){
+    const ds={
+      'otd-srtm30m':'srtm30m','otd-aster30m':'aster30m',
+      'otd-eudem25m':'eudem25m','otd-ned10m':'ned10m','otd-mapzen':'mapzen'
+    }[t];
+    const elevs=[], chunks=chunk(points,100);
+    for(let i=0;i<chunks.length;i++){
+      const locs=chunks[i].map(p=>`${p.lat},${p.lon}`).join('|');
+      const r=await fetch(`https://api.opentopodata.org/v1/${ds}?locations=${locs}`);
+      if(!r.ok) throw new Error(`opentopodata ${r.status}: ${await r.text()}`);
+      const d=await r.json();
+      if(d.status!=='OK') throw new Error(`opentopodata: ${d.error||d.status}`);
+      d.results.forEach(x=>elevs.push(x.elevation??0));
+      if(i<chunks.length-1) await sleep(1150);
+    }
+    return elevs;
+  }
+
+  log(`${t}: backend needed — using demo terrain`,'lwarn');
+  return demoTerrain(points);
+}
+
+function demoTerrain(pts){
+  return pts.map((_,i)=>{
+    const t=i/(pts.length-1);
+    return Math.max(0,75+25*Math.sin(t*Math.PI*2)+15*Math.sin(t*Math.PI*5.8)
+      +60*Math.exp(-0.5*((t-.54)/.09)**2)+6*(Math.random()-.5));
+  });
+}
+
+// ── Test source ───────────────────────────────────────────────────────
+async function testSource(){
+  const btn=document.getElementById('testBtn');
+  btn.textContent='TESTING...'; btn.disabled=true;
+  try{
+    const e=await fetchElevations([{lat:40.05,lon:-75.1}]);
+    log(`Source OK — test: ${e[0].toFixed(1)} m`,'lok');
+    setPill('srcPill','SOURCE OK','ok');
+  }catch(err){
+    log(`Source error: ${err.message}`,'lerr');
+    setPill('srcPill','SOURCE ERR','err');
+  }
+  btn.textContent='TEST SOURCE'; btn.disabled=false;
+}
+
+// ── Physics ───────────────────────────────────────────────────────────
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371000,r=Math.PI/180;
+  const dLat=(lat2-lat1)*r,dLon=(lon2-lon1)*r;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+async function analyzeLink(link){
+  const na=nodes.find(n=>n.id===link.a), nb=nodes.find(n=>n.id===link.b);
+  if(!na||!nb) return;
+  const N=+document.getElementById('nsamples').value;
+  const freq=+document.getElementById('freq').value;
+  const k=+document.getElementById('kfactor').value||1.333;
+  const lambda=300/freq, Re=6371000*k;
+  const totalD=haversine(na.lat,na.lon,nb.lat,nb.lon);
+
+  const pts=Array.from({length:N},(_,i)=>{
+    const t=i/(N-1);
+    return {lat:na.lat+t*(nb.lat-na.lat),lon:na.lon+t*(nb.lon-na.lon),t};
+  });
+
+  const elevs=await fetchElevations(pts);
+  let minPct=Infinity,minT=0.5,maxElev=0;
+
+  const profile=pts.map((p,i)=>{
+    const t=p.t,d1=t*totalD,d2=(1-t)*totalD;
+    const elev=elevs[i]??0;
+    const bulge=d1*d2/(2*Re);
+    const losAbs=(elevs[0]+na.antH)+t*((elevs[N-1]+nb.antH)-(elevs[0]+na.antH))-bulge;
+    const fz1=t>0&&t<1?Math.sqrt(lambda*d1*d2/totalD):0;
+    const fz2=t>0&&t<1?Math.sqrt(2*lambda*d1*d2/totalD):0;
+    const clearance=losAbs-elev;
+    if(t>.01&&t<.99&&fz1>0){const pct=clearance/fz1*100;if(pct<minPct){minPct=pct;minT=t}}
+    if(elev>maxElev) maxElev=elev;
+    return {t,distKm:d1/1000,elev,losAbs,fz1,fz2,clearance};
+  });
+
+  link.profile=profile; link.clearPct=minPct; link.minT=minT;
+  link.maxElev=maxElev; link.totalD=totalD; link.lambda=lambda;
+  link.na=na; link.nb=nb;
+  link.status=minPct>=60?'good':minPct>=0?'warn':'bad';
+  redrawLine(link);
+  updateDistLabel(link);
+}
+
+async function analyzeAll(){
+  if(!links.length){log('No links — add nodes first','lwarn');return}
+  const btn=document.getElementById('analyzeBtn');
+  btn.innerHTML='<span class="spinner"></span>RUNNING...'; btn.disabled=true;
+  log(`Analyzing ${links.length} link(s)...`,'linfo');
+  let ok=0,bad=0;
+  for(const link of links){
+    const na=nodes.find(n=>n.id===link.a),nb=nodes.find(n=>n.id===link.b);
+    try{
+      log(`${na.name} ↔ ${nb.name}...`,'linfo');
+      await analyzeLink(link);
+      log(`  ${link.clearPct.toFixed(0)}% FZ1 [${link.status.toUpperCase()}]`,
+          link.status==='good'?'lok':link.status==='warn'?'lwarn':'lerr');
+      ok++;
+    }catch(err){log(`  Error: ${err.message}`,'lerr');bad++}
+  }
+  renderLinkList();
+  const toShow=selectedLink?links.find(l=>l.id===selectedLink):links[0];
+  if(toShow?.profile) selectLink(toShow.id);
+  log(`Done: ${ok} ok, ${bad} errors`,bad===0?'lok':'lwarn');
+  const allGood=links.every(l=>l.status==='good'),anyBad=links.some(l=>l.status==='bad');
+  setPill('srcPill',allGood?'MESH OK':anyBad?'BLOCKED':'PARTIAL',allGood?'ok':anyBad?'err':'warn');
+  btn.textContent='ANALYZE ALL'; btn.disabled=false;
+}
+
+// ── Profile drawing ───────────────────────────────────────────────────
+function showProfile(link){
+  document.getElementById('profileEmpty').style.display='none';
+  document.getElementById('profileTitle').textContent=`TERRAIN — ${nname(link.a)} ↔ ${nname(link.b)}`;
+  drawProfile(link.profile, link.na, link.nb);
+}
+
+function drawProfile(profile, na, nb){
+  const canvas=document.getElementById('profileCanvas');
+  const pane=canvas.parentElement;
+  const W=pane.clientWidth, H=pane.clientHeight;
+  canvas.width=W*devicePixelRatio; canvas.height=H*devicePixelRatio;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  const ctx=canvas.getContext('2d'), dpr=devicePixelRatio;
+
+  const mx=50*dpr, myT=30*dpr, myB=20*dpr;
+  const pw=W*dpr-mx-8*dpr, ph=H*dpr-myT-myB;
+  ctx.clearRect(0,0,W*dpr,H*dpr);
+
+  const allY=[...profile.map(p=>p.elev),...profile.map(p=>p.losAbs+p.fz1),...profile.map(p=>p.losAbs)];
+  const wMin=Math.min(...allY)-12, wMax=Math.max(...allY)+16, wH=wMax-wMin;
+  const wx=t=>mx+t*pw, wy=y=>myT+(1-(y-wMin)/wH)*ph;
+  const N=profile.length;
+
+  // Y grid
+  const step=Math.pow(10,Math.floor(Math.log10(wH/4)));
+  for(let y=Math.ceil(wMin/step)*step;y<=wMax;y+=step){
+    const yp=wy(y); if(yp<myT||yp>myT+ph) continue;
+    ctx.beginPath(); ctx.moveTo(mx,yp); ctx.lineTo(mx+pw,yp);
+    ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=dpr; ctx.setLineDash([]); ctx.stroke();
+    ctx.fillStyle='#56687a'; ctx.font=`${9*dpr}px 'Azeret Mono',monospace`;
+    ctx.textAlign='right'; ctx.fillText(Math.round(y)+'m',mx-4*dpr,yp+3*dpr);
+  }
+
+  // FZ1 fill
+  ctx.beginPath();
+  profile.forEach((p,i)=>{i===0?ctx.moveTo(wx(p.t),wy(p.losAbs+p.fz1)):ctx.lineTo(wx(p.t),wy(p.losAbs+p.fz1))});
+  profile.slice().reverse().forEach(p=>ctx.lineTo(wx(p.t),wy(p.losAbs-p.fz1)));
+  ctx.closePath(); ctx.fillStyle='rgba(245,166,35,0.07)'; ctx.fill();
+
+  // FZ1 dashed outline
+  ['add','sub'].forEach(op=>{
+    ctx.beginPath();
+    profile.forEach((p,i)=>{
+      const y=op==='add'?p.losAbs+p.fz1:p.losAbs-p.fz1;
+      i===0?ctx.moveTo(wx(p.t),wy(y)):ctx.lineTo(wx(p.t),wy(y));
+    });
+    ctx.setLineDash([5*dpr,3*dpr]); ctx.strokeStyle='rgba(245,166,35,0.6)';
+    ctx.lineWidth=dpr; ctx.stroke(); ctx.setLineDash([]);
+  });
+
+  // 60% FZ1 line
+  ctx.beginPath();
+  profile.forEach((p,i)=>{const y=p.losAbs-p.fz1*0.6;i===0?ctx.moveTo(wx(p.t),wy(y)):ctx.lineTo(wx(p.t),wy(y))});
+  ctx.setLineDash([3*dpr,3*dpr]); ctx.strokeStyle='rgba(255,255,255,0.13)';
+  ctx.lineWidth=dpr; ctx.stroke(); ctx.setLineDash([]);
+
+  // Terrain fill
+  ctx.beginPath();
+  ctx.moveTo(wx(0),wy(wMin));
+  profile.forEach(p=>ctx.lineTo(wx(p.t),wy(p.elev)));
+  ctx.lineTo(wx(1),wy(wMin)); ctx.closePath();
+  ctx.fillStyle='rgba(99,153,34,0.18)'; ctx.fill();
+  ctx.beginPath();
+  profile.forEach((p,i)=>{i===0?ctx.moveTo(wx(p.t),wy(p.elev)):ctx.lineTo(wx(p.t),wy(p.elev))});
+  ctx.strokeStyle='#639922'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([]); ctx.stroke();
+
+  // Violation fill
+  let seg=false;
+  ctx.beginPath();
+  profile.forEach(p=>{
+    const fzBot=p.losAbs-p.fz1;
+    if(p.elev>fzBot){seg?ctx.lineTo(wx(p.t),wy(p.elev)):ctx.moveTo(wx(p.t),wy(p.elev));seg=true}
+    else{seg=false}
+  });
+  profile.slice().reverse().forEach(p=>{if(p.elev>p.losAbs-p.fz1)ctx.lineTo(wx(p.t),wy(p.losAbs-p.fz1))});
+  ctx.closePath(); ctx.fillStyle='rgba(226,75,74,0.28)'; ctx.fill();
+
+  // LOS
+  ctx.beginPath();
+  profile.forEach((p,i)=>{i===0?ctx.moveTo(wx(p.t),wy(p.losAbs)):ctx.lineTo(wx(p.t),wy(p.losAbs))});
+  ctx.strokeStyle='#3b8bd4'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([]); ctx.stroke();
+
+  // Antenna masts
+  function mast(t,gnd,antH,color){
+    const x=wx(t),base=wy(gnd),top=wy(gnd+antH);
+    ctx.beginPath(); ctx.moveTo(x,base); ctx.lineTo(x,top);
+    ctx.strokeStyle=color; ctx.lineWidth=2*dpr; ctx.setLineDash([]); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,top,5*dpr,0,Math.PI*2);
+    ctx.fillStyle=color; ctx.fill();
+    ctx.strokeStyle='#090c0e'; ctx.lineWidth=1.5*dpr; ctx.stroke();
+  }
+  mast(0,profile[0].elev,na.antH,na.color);
+  mast(1,profile[N-1].elev,nb.antH,nb.color);
+
+  // Node name labels
+  ctx.font=`500 ${9*dpr}px 'Azeret Mono',monospace`; ctx.textAlign='center';
+  ctx.fillStyle=na.color; ctx.fillText(na.name,wx(0),wy(profile[0].elev+na.antH)-9*dpr);
+  ctx.fillStyle=nb.color; ctx.fillText(nb.name,wx(1),wy(profile[N-1].elev+nb.antH)-9*dpr);
+
+  // X axis labels
+  ctx.fillStyle='#56687a'; ctx.font=`${9*dpr}px 'Azeret Mono',monospace`; ctx.textAlign='center';
+  const totKm=profile[N-1].distKm;
+  for(let i=0;i<=5;i++){const t=i/5;ctx.fillText((t*totKm).toFixed(1)+'km',wx(t),myT+ph+myB-4*dpr)}
+}
+
+// ── Results panel ─────────────────────────────────────────────────────
+function updateResultsPanel(link){
+  setR('r-link',`${nname(link.a)} ↔ ${nname(link.b)}`);
+  setR('r-dist',(link.totalD/1000).toFixed(2)+' km');
+  const r1mid=Math.sqrt(link.lambda*link.totalD/2*link.totalD/2/link.totalD);
+  setR('r-fz1',r1mid.toFixed(1)+' m');
+  setR('r-need',(r1mid*.6).toFixed(1)+' m');
+  const N=link.profile.length;
+  const cp=link.profile[Math.round(link.minT*(N-1))];
+  const cls=link.clearPct>=60?'good':link.clearPct>=0?'warn':'bad';
+  setR('r-clear',`${cp.clearance.toFixed(1)} m  (${link.clearPct.toFixed(0)}% FZ1)`,cls);
+  setR('r-maxelev',link.maxElev.toFixed(0)+' m');
+  setR('r-obsloc',(link.minT*100).toFixed(0)+'% along path');
+  setR('r-status',{good:'CLEAR ✓',warn:'PARTIAL ⚠',bad:'LOS BLOCKED ✗'}[link.status],cls);
+}
+function setR(id,val,cls=''){const e=document.getElementById(id);e.textContent=val;e.className='rval'+(cls?' '+cls:'')}
+function clearResults(){['r-link','r-dist','r-fz1','r-need','r-clear','r-maxelev','r-obsloc','r-status'].forEach(id=>setR(id,'—'))}
+
+// ── Utils ─────────────────────────────────────────────────────────────
+function setPill(id,txt,cls){const e=document.getElementById(id);e.textContent=txt;e.className='hpill '+(cls||'')}
+function log(msg,type='linfo'){
+  const el=document.getElementById('log');
+  const d=document.createElement('div'); d.className=type;
+  d.textContent=`[${new Date().toTimeString().slice(0,8)}] ${msg}`;
+  el.appendChild(d); el.scrollTop=el.scrollHeight;
+}
+
+window.addEventListener('resize',()=>{
+  if(selectedLink){const l=links.find(l=>l.id===selectedLink);if(l?.profile)showProfile(l)}
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────
+initMap();
+log('Ready — click map to place nodes, links form automatically','lok');
+log('SRTM 30m (OpenTopoData) is default — no API key needed','linfo');
+log('Results values are clickable to copy · drag ⠿ to reorder nodes','linfo');
+</script>
+</body>
+</html>
