@@ -18,6 +18,10 @@
      v1.5.0  2025-01-xx  Version shown in header, default antenna height
                           2m, clicking a node row loads it into the
                           Add/Edit coord form and scrolls to it
+     v1.6.0  2025-01-xx  Form enters Edit mode when node selected (Enter
+                          or Update Node button overwrites the node),
+                          Cancel Edit clears state, name uniqueness
+                          enforced across add/edit/rename/import
      ================================================================ -->
 <html lang="en">
 <head>
@@ -177,7 +181,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
   <div class="hpill" id="modePill">ADD NODE</div>
   <div class="spacer"></div>
   <div class="hpill" id="meshPill">0 NODES · 0 LINKS</div>
-  <div class="hpill" style="color:var(--muted);border-color:var(--border)">v1.5.0</div>
+  <div class="hpill" style="color:var(--muted);border-color:var(--border)">v1.6.0</div>
 </header>
 
 <div class="workspace">
@@ -238,21 +242,22 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
 
   <!-- Add by Coordinates -->
   <div class="ss">
-    <div class="slabel">Add / Edit by Coordinates</div>
-    <div class="coord-panel">
+    <div class="slabel" id="coordFormLabel">Add / Edit by Coordinates</div>
+    <div class="coord-panel" id="coordPanel">
       <div class="coord-row">
-        <div class="coord-field"><label>Latitude (decimal°)</label><input type="number" id="inp_lat" step="0.00001" placeholder="40.05000"></div>
-        <div class="coord-field"><label>Longitude (decimal°)</label><input type="number" id="inp_lon" step="0.00001" placeholder="-75.10000"></div>
+        <div class="coord-field"><label>Latitude (decimal°)</label><input type="number" id="inp_lat" step="0.00001" placeholder="40.05000" onkeydown="formKeyDown(event)"></div>
+        <div class="coord-field"><label>Longitude (decimal°)</label><input type="number" id="inp_lon" step="0.00001" placeholder="-75.10000" onkeydown="formKeyDown(event)"></div>
       </div>
       <div class="coord-row" style="margin-bottom:0">
-        <div class="coord-field"><label>Ant. height (m)</label><input type="number" id="inp_h" value="2" min="1" max="500"></div>
-        <div class="coord-field"><label>Name (optional)</label><input type="text" id="inp_name" placeholder="Node name"></div>
+        <div class="coord-field"><label>Ant. height (m)</label><input type="number" id="inp_h" value="2" min="1" max="500" onkeydown="formKeyDown(event)"></div>
+        <div class="coord-field"><label>Name</label><input type="text" id="inp_name" placeholder="Node name" onkeydown="formKeyDown(event)"></div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
-      <button class="btn btn-sm" onclick="addNodeFromForm()">+ Add Node</button>
-      <button class="btn btn-sm" onclick="copyCoordForm()">⎘ Copy</button>
+      <button class="btn btn-sm" id="formSubmitBtn" onclick="submitCoordForm()">+ Add Node</button>
+      <button class="btn btn-sm" onclick="copyCoordForm()" id="formCopyBtn">⎘ Copy</button>
     </div>
+    <button class="btn-danger" id="formCancelBtn" style="display:none" onclick="cancelEdit()">✕ Cancel Edit</button>
   </div>
 
   <!-- KML Import/Export -->
@@ -408,12 +413,13 @@ function onMapDblClick(e){
 function addNode(lat, lon, overrideName=null, overrideH=null){
   const idx=nodes.length, id=++nodeSeq;
   const color=COLORS[idx%COLORS.length];
-  const antH=overrideH||+document.getElementById('defAntH').value||30;
-  // Allocate a display number (gap-filling). If overrideName is given we
-  // still allocate a num so the pool stays consistent; the name just
-  // won't use it visibly.
+  const antH=overrideH||+document.getElementById('defAntH').value||2;
   const num=nextNum();
-  const name=overrideName||`N${num}`;
+  // Resolve name — if override clashes, append suffix rather than silently failing
+  let baseName=overrideName||`N${num}`;
+  let name=baseName;
+  let suffix=2;
+  while(nodes.find(n=>n.name===name)){ name=`${baseName} (${suffix++})`; }
 
   const marker=L.marker([lat,lon],{icon:makeIcon(color,name),draggable:true}).addTo(map);
   marker.bindTooltip(name,{permanent:true,direction:'top',offset:[0,-13],opacity:1});
@@ -435,23 +441,92 @@ function addNode(lat, lon, overrideName=null, overrideH=null){
   return node;
 }
 
-function addNodeFromForm(){
+// ── Coord form state ─────────────────────────────────────────────────
+let activeEditNodeId = null;  // null = add mode, number = edit mode
+
+function formKeyDown(e){ if(e.key==='Enter') submitCoordForm(); }
+
+function submitCoordForm(){
   const lat=parseFloat(document.getElementById('inp_lat').value);
   const lon=parseFloat(document.getElementById('inp_lon').value);
-  const h=parseFloat(document.getElementById('inp_h').value)||30;
-  const name=document.getElementById('inp_name').value.trim()||null;
+  const h=parseFloat(document.getElementById('inp_h').value)||2;
+  const nameRaw=document.getElementById('inp_name').value.trim();
+
   if(isNaN(lat)||isNaN(lon)){toast('Enter valid lat/lon'); return}
   if(lat<-90||lat>90||lon<-180||lon>180){toast('Coordinates out of range'); return}
-  const n=addNode(lat,lon,name,h);
+
+  if(activeEditNodeId !== null){
+    // ── UPDATE existing node ──────────────────────────────────────────
+    const n=nodes.find(n=>n.id===activeEditNodeId);
+    if(!n){toast('Node not found'); cancelEdit(); return}
+
+    const newName = nameRaw || n.name; // keep old name if field left blank
+
+    // Name uniqueness — allow keeping own name
+    if(newName !== n.name){
+      const conflict=nodes.find(nn=>nn.name===newName && nn.id!==activeEditNodeId);
+      if(conflict){toast(`Name "${newName}" already in use`); return}
+    }
+
+    // Apply changes
+    n.lat=lat; n.lon=lon; n.antH=h;
+    if(newName !== n.name){
+      n.name=newName;
+      n.marker.setTooltipContent(n.name);
+      n.marker.setIcon(makeIcon(n.color, n.name));
+    }
+    n.marker.setLatLng([lat,lon]);
+
+    // Invalidate links through this node
+    links.filter(l=>l.a===n.id||l.b===n.id).forEach(l=>{
+      l.status='pending'; l.profile=null; redrawLine(l); updateDistLabel(l);
+    });
+
+    renderNodeList(); renderLinkList();
+    map.panTo([lat,lon]);
+    log(`Updated ${n.name} → ${lat.toFixed(5)}, ${lon.toFixed(5)}, ${h}m`,'lok');
+    cancelEdit();
+
+  } else {
+    // ── ADD new node ──────────────────────────────────────────────────
+    const name = nameRaw || null; // null → auto N{num}
+
+    // Name uniqueness check
+    if(name){
+      const conflict=nodes.find(nn=>nn.name===name);
+      if(conflict){toast(`Name "${name}" already in use`); return}
+    }
+
+    const n=addNode(lat,lon,name,h);
+    document.getElementById('inp_lat').value='';
+    document.getElementById('inp_lon').value='';
+    document.getElementById('inp_name').value='';
+    map.panTo([n.lat,n.lon]);
+  }
+}
+
+// Keep addNodeFromForm as alias so KML import path still works
+function addNodeFromForm(){ submitCoordForm(); }
+
+function cancelEdit(){
+  activeEditNodeId=null;
+  document.getElementById('coordFormLabel').textContent='Add / Edit by Coordinates';
+  document.getElementById('formSubmitBtn').textContent='+ Add Node';
+  document.getElementById('formCancelBtn').style.display='none';
+  document.getElementById('coordPanel').style.borderColor='';
+  document.querySelectorAll('.node-item').forEach(el=>el.classList.remove('sel'));
   document.getElementById('inp_lat').value='';
   document.getElementById('inp_lon').value='';
   document.getElementById('inp_name').value='';
-  map.panTo([n.lat,n.lon]);
 }
 
 function renameNode(id, newName){
   const n=nodes.find(n=>n.id===id); if(!n||!newName.trim()) return;
-  n.name=newName.trim();
+  const trimmed=newName.trim();
+  // Uniqueness check
+  const conflict=nodes.find(nn=>nn.name===trimmed && nn.id!==id);
+  if(conflict){toast(`Name "${trimmed}" already in use`); return}
+  n.name=trimmed;
   n.marker.setIcon(makeIcon(n.color,n.name));
   n.marker.setTooltipContent(n.name);
   renderNodeList(); renderLinkList();
@@ -630,10 +705,16 @@ function startRename(id){
 
 function fillCoordForm(id){
   const n=nodes.find(n=>n.id===id); if(!n) return;
+  activeEditNodeId=id;
   document.getElementById('inp_lat').value=n.lat.toFixed(5);
   document.getElementById('inp_lon').value=n.lon.toFixed(5);
   document.getElementById('inp_h').value=n.antH;
   document.getElementById('inp_name').value=n.name;
+  // Switch form to Edit mode
+  document.getElementById('coordFormLabel').textContent=`Editing: ${n.name}`;
+  document.getElementById('formSubmitBtn').textContent='✓ Update Node';
+  document.getElementById('formCancelBtn').style.display='block';
+  document.getElementById('coordPanel').style.borderColor=n.color;
   // Highlight active row in the node list
   document.querySelectorAll('.node-item').forEach(el=>el.classList.remove('sel'));
   const items=document.querySelectorAll('.node-item');
@@ -641,6 +722,9 @@ function fillCoordForm(id){
   if(items[idx]) items[idx].classList.add('sel');
   // Scroll the coord form into view smoothly
   document.getElementById('inp_lat').closest('.ss').scrollIntoView({behavior:'smooth',block:'nearest'});
+  // Focus name field for quick rename
+  document.getElementById('inp_name').focus();
+  document.getElementById('inp_name').select();
 }
 
 function toggleLinkHidden(id,e){
