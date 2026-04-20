@@ -13,11 +13,11 @@
                           freed slot numbers on delete), saved to
                           /Users/ericforbes/Documents/Airendil Networks/
                           FresnelCalculator/FresnelAnalysis/index.html
-     v1.4.0  2025-01-xx  Sidebar fully scrollable (no more fixed-height
-                          sections), tooltip popover escapes sidebar via
-                          fixed positioning over map, double-click to add
-                          node (single-click = pan/select only),
-                          per-link hide/show toggle (● / ◌) in link list
+     v1.4.0  2025-01-xx  Sidebar fully scrollable, tooltip popover over
+                          map, double-click to add node, per-link hide/show
+     v1.5.0  2025-01-xx  Version shown in header, default antenna height
+                          2m, clicking a node row loads it into the
+                          Add/Edit coord form and scrolls to it
      ================================================================ -->
 <html lang="en">
 <head>
@@ -177,6 +177,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
   <div class="hpill" id="modePill">ADD NODE</div>
   <div class="spacer"></div>
   <div class="hpill" id="meshPill">0 NODES · 0 LINKS</div>
+  <div class="hpill" style="color:var(--muted);border-color:var(--border)">v1.5.0</div>
 </header>
 
 <div class="workspace">
@@ -215,7 +216,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
       <div class="field"><label>Frequency (MHz)</label><input type="number" id="freq" value="900" min="50" max="80000"></div>
-      <div class="field"><label>Default ant. ht (m)</label><input type="number" id="defAntH" value="30" min="1" max="500"></div>
+      <div class="field"><label>Default ant. ht (m)</label><input type="number" id="defAntH" value="2" min="1" max="500"></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
       <div class="field">
@@ -244,7 +245,7 @@ header{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;borde
         <div class="coord-field"><label>Longitude (decimal°)</label><input type="number" id="inp_lon" step="0.00001" placeholder="-75.10000"></div>
       </div>
       <div class="coord-row" style="margin-bottom:0">
-        <div class="coord-field"><label>Ant. height (m)</label><input type="number" id="inp_h" value="30" min="1" max="500"></div>
+        <div class="coord-field"><label>Ant. height (m)</label><input type="number" id="inp_h" value="2" min="1" max="500"></div>
         <div class="coord-field"><label>Name (optional)</label><input type="text" id="inp_name" placeholder="Node name"></div>
       </div>
     </div>
@@ -598,7 +599,7 @@ function renderNodeList(){
     d.innerHTML=`
       <div class="drag-handle">⠿</div>
       <div class="node-dot" style="background:${n.color}"></div>
-      <div class="node-info" onclick="map.panTo([${n.lat},${n.lon}])">
+      <div class="node-info" onclick="fillCoordForm(${n.id});map.panTo([${n.lat},${n.lon}])" title="Click to load into editor">
         <div class="node-name-wrap">
           <span class="node-name" style="color:${n.color}" id="nn-${n.id}">${n.name}</span>
           <button class="btn-icon" style="font-size:9px" onclick="event.stopPropagation();startRename(${n.id})" title="Rename">✎</button>
@@ -608,7 +609,6 @@ function renderNodeList(){
         </div>
       </div>
       <div class="node-actions">
-        <button class="btn-icon" onclick="event.stopPropagation();fillCoordForm(${n.id})" title="Edit in form">⊞</button>
         <button class="btn-icon" style="color:var(--red)" onclick="event.stopPropagation();removeNode(${n.id})" title="Delete">✕</button>
       </div>`;
     el.appendChild(d);
@@ -634,6 +634,13 @@ function fillCoordForm(id){
   document.getElementById('inp_lon').value=n.lon.toFixed(5);
   document.getElementById('inp_h').value=n.antH;
   document.getElementById('inp_name').value=n.name;
+  // Highlight active row in the node list
+  document.querySelectorAll('.node-item').forEach(el=>el.classList.remove('sel'));
+  const items=document.querySelectorAll('.node-item');
+  const idx=nodes.findIndex(nn=>nn.id===id);
+  if(items[idx]) items[idx].classList.add('sel');
+  // Scroll the coord form into view smoothly
+  document.getElementById('inp_lat').closest('.ss').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
 function toggleLinkHidden(id,e){
